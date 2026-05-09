@@ -1,0 +1,1542 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Launch" />
+<meta name="theme-color" content="#05070C" />
+<title>Launch — Mission Control for Momentum</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  html, body, #root {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background: #05070C;
+    color: #fff;
+    font-family: "Space Grotesk", -apple-system, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overscroll-behavior: none;
+  }
+  body {
+    overflow: hidden;
+    /* Lock to fill the viewport including dynamic UI on mobile. */
+    position: fixed;
+    width: 100%;
+    height: 100vh;
+    height: 100dvh;
+  }
+  #root {
+    width: 100%;
+    height: 100%;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+  }
+  * { box-sizing: border-box; }
+  button, [role="button"], input {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+  ::selection { background: rgba(0,229,255,0.4); color: #fff; }
+
+  @keyframes blink { 0%,49% { opacity: 1 } 50%,100% { opacity: 0 } }
+  @keyframes pulse { 0%,100% { transform: scale(1); opacity: 1 } 50% { transform: scale(1.4); opacity: 0.6 } }
+  @keyframes breathe { 0%,100% { transform: scale(1); opacity: 0.85 } 50% { transform: scale(1.06); opacity: 1 } }
+  @keyframes ringPulse {
+    0%   { transform: scale(0.85); opacity: 0.6 }
+    100% { transform: scale(1.15); opacity: 0   }
+  }
+  @keyframes countIn {
+    0%   { transform: scale(1.4); opacity: 0; filter: blur(20px) }
+    60%  { transform: scale(1);   opacity: 1; filter: blur(0)    }
+    100% { transform: scale(1);   opacity: 1                     }
+  }
+  @keyframes rayPulse {
+    0%, 100% { opacity: 0.3 }
+    50%      { opacity: 0.9 }
+  }
+  @keyframes modalIn {
+    0%   { transform: scale(0.94) translateY(8px); opacity: 0 }
+    100% { transform: scale(1)    translateY(0);   opacity: 1 }
+  }
+  @keyframes backdropIn {
+    0%   { opacity: 0 }
+    100% { opacity: 1 }
+  }
+  @keyframes optionIn {
+    0%   { transform: translateY(8px); opacity: 0 }
+    100% { transform: translateY(0);   opacity: 1 }
+  }
+  @keyframes spin360 { to { transform: rotate(360deg) } }
+
+  /* Hide native input clear/cancel chrome on iOS */
+  input::-webkit-search-decoration,
+  input::-webkit-search-cancel-button,
+  input::-webkit-search-results-button,
+  input::-webkit-search-results-decoration { display: none; }
+</style>
+</head>
+<body>
+
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useMemo } = React;
+
+// ─────────────────────────────────────────────────────────────
+// Design tokens
+// ─────────────────────────────────────────────────────────────
+const T = {
+  bg: '#05070C',
+  bgSoft: '#0B1018',
+  surface: 'rgba(255,255,255,0.04)',
+  surface2: 'rgba(255,255,255,0.07)',
+  hairline: 'rgba(140,200,255,0.14)',
+  hairlineSoft: 'rgba(140,200,255,0.08)',
+  text: 'rgba(255,255,255,0.96)',
+  text2: 'rgba(255,255,255,0.62)',
+  text3: 'rgba(255,255,255,0.38)',
+  cyan: '#00E5FF',
+  blue: '#3D7FFF',
+  purple: '#A876FF',
+  teal: '#4FE3C1',
+  warn: '#FFB347',
+  display: '"Space Grotesk", -apple-system, system-ui, sans-serif',
+  mono: '"JetBrains Mono", ui-monospace, "SF Mono", monospace',
+};
+
+// ─────────────────────────────────────────────────────────────
+// Atomic components
+// ─────────────────────────────────────────────────────────────
+function Eyebrow({ children, color = T.cyan, style }) {
+  return (
+    <div style={{
+      fontFamily: T.mono, fontSize: 10.5, letterSpacing: '0.22em',
+      textTransform: 'uppercase', color,
+      display: 'inline-flex', alignItems: 'center', gap: 8,
+      ...style,
+    }}>
+      <span style={{ width: 6, height: 6, borderRadius: 99, background: color, boxShadow: `0 0 10px ${color}` }} />
+      {children}
+    </div>
+  );
+}
+
+function Telemetry({ time, code = 'MC-04', state = 'IDLE' }) {
+  return (
+    <div style={{
+      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+      fontFamily: T.mono, fontSize: 10, letterSpacing: '0.18em',
+      color: T.text3, padding: '0 24px',
+    }}>
+      <span>{code} · {state}</span>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ width: 5, height: 5, borderRadius: 99, background: T.teal, boxShadow: `0 0 8px ${T.teal}`, animation: 'pulse 1.6s ease-in-out infinite' }} />
+        {time}
+      </span>
+    </div>
+  );
+}
+
+function GlowButton({ children, onClick, variant = 'primary', disabled, style }) {
+  const isPrimary = variant === 'primary';
+  return (
+    <button onClick={onClick} disabled={disabled} style={{
+      width: '100%', height: 60, borderRadius: 18,
+      border: isPrimary ? '1px solid rgba(0,229,255,0.5)' : `1px solid ${T.hairline}`,
+      background: isPrimary
+        ? 'linear-gradient(180deg, rgba(0,229,255,0.18) 0%, rgba(61,127,255,0.16) 100%)'
+        : 'rgba(255,255,255,0.04)',
+      color: T.text,
+      fontFamily: T.display, fontSize: 16, fontWeight: 600, letterSpacing: '0.04em',
+      textTransform: 'uppercase',
+      cursor: disabled ? 'not-allowed' : 'pointer',
+      opacity: disabled ? 0.4 : 1,
+      position: 'relative', overflow: 'hidden',
+      boxShadow: isPrimary
+        ? '0 0 0 1px rgba(0,229,255,0.15) inset, 0 8px 30px rgba(0,229,255,0.25), 0 0 60px rgba(61,127,255,0.18)'
+        : '0 1px 0 rgba(255,255,255,0.05) inset',
+      transition: 'transform 120ms ease, box-shadow 200ms ease',
+      WebkitTapHighlightColor: 'transparent',
+      ...style,
+    }}
+    onTouchStart={e => e.currentTarget.style.transform = 'scale(0.985)'}
+    onTouchEnd={e => e.currentTarget.style.transform = 'scale(1)'}
+    onMouseDown={e => e.currentTarget.style.transform = 'scale(0.985)'}
+    onMouseUp={e => e.currentTarget.style.transform = 'scale(1)'}
+    onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}>
+      {isPrimary && <span style={{
+        position: 'absolute', inset: 0,
+        background: 'radial-gradient(ellipse at 50% 120%, rgba(0,229,255,0.5) 0%, transparent 60%)',
+        opacity: 0.6, pointerEvents: 'none',
+      }} />}
+      <span style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 10, width: '100%' }}>
+        {children}
+      </span>
+    </button>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Screen 1 — Mission Input
+// ─────────────────────────────────────────────────────────────
+function MissionInput({ onLaunch, mission, setMission }) {
+  const examples = [
+    'Finish proposal deck',
+    'Send client follow-up',
+    'Start workout',
+    'Reply to Sarah',
+    'Outline Q3 review',
+  ];
+  const [phIdx, setPhIdx] = useState(0);
+  const [inputFocused, setInputFocused] = useState(false);
+
+  useEffect(() => {
+    if (mission) return;
+    const id = setInterval(() => setPhIdx(i => (i + 1) % examples.length), 2400);
+    return () => clearInterval(id);
+  }, [mission]);
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '0 0 24px', minHeight: 0 }}>
+      <div style={{ paddingTop: 8 }}>
+        <Telemetry time="04:32:11 UTC" code="MC-04 / READY" state="STANDBY" />
+      </div>
+
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '0 24px', minHeight: 0 }}>
+        <Eyebrow style={{ marginBottom: 16 }}>Pre-flight</Eyebrow>
+        <h1 style={{
+          fontFamily: T.display, fontWeight: 600, fontSize: 38, lineHeight: 1.05,
+          letterSpacing: '-0.02em', color: T.text, margin: 0,
+        }}>
+          What mission<br/>are we launching?
+        </h1>
+        <p style={{
+          fontFamily: T.display, fontSize: 14, color: T.text2,
+          marginTop: 14, marginBottom: 28, lineHeight: 1.5, fontWeight: 400,
+        }}>
+          One task. We'll break it into checkpoints and guide you step by step.
+        </p>
+
+        <div style={{
+          position: 'relative',
+          background: 'linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))',
+          border: `1px solid ${inputFocused ? 'rgba(0,229,255,0.5)' : T.hairline}`,
+          borderRadius: 20, padding: '20px 20px 18px',
+          transition: 'all 200ms ease',
+          boxShadow: inputFocused
+            ? '0 0 0 4px rgba(0,229,255,0.08), 0 0 40px rgba(0,229,255,0.18) inset'
+            : 'inset 0 1px 0 rgba(255,255,255,0.04)',
+        }}>
+          <div style={{
+            fontFamily: T.mono, fontSize: 9.5, letterSpacing: '0.24em',
+            color: inputFocused ? T.cyan : T.text3,
+            textTransform: 'uppercase', marginBottom: 10,
+            transition: 'color 200ms',
+          }}>
+            ▸ Mission Objective
+          </div>
+          <input
+            value={mission}
+            onChange={e => setMission(e.target.value)}
+            onFocus={() => setInputFocused(true)}
+            onBlur={() => setInputFocused(false)}
+            placeholder={examples[phIdx]}
+            enterKeyHint="go"
+            onKeyDown={e => { if (e.key === 'Enter' && mission.trim()) { e.currentTarget.blur(); onLaunch(); } }}
+            style={{
+              width: '100%', background: 'transparent', border: 'none', outline: 'none',
+              fontFamily: T.display, fontSize: 22, fontWeight: 500,
+              color: T.text, letterSpacing: '-0.01em',
+              padding: 0,
+              WebkitAppearance: 'none', appearance: 'none',
+            }}
+          />
+          {!mission && !inputFocused && (
+            <div style={{
+              position: 'absolute', left: 20, top: 48,
+              width: 1.5, height: 24, background: T.cyan,
+              animation: 'blink 1.1s steps(2) infinite',
+              boxShadow: `0 0 8px ${T.cyan}`,
+            }} />
+          )}
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 18 }}>
+          <div style={{
+            fontFamily: T.mono, fontSize: 9.5, letterSpacing: '0.24em',
+            color: T.text3, textTransform: 'uppercase', marginBottom: 4,
+          }}>
+            Recent / Suggested
+          </div>
+          {examples.slice(0, 3).map((ex, i) => (
+            <button key={i} onClick={() => setMission(ex)} style={{
+              display: 'flex', alignItems: 'center', gap: 12,
+              background: 'rgba(255,255,255,0.025)',
+              border: `1px solid ${T.hairlineSoft}`,
+              borderRadius: 14, padding: '12px 14px',
+              fontFamily: T.display, fontSize: 14, color: T.text2,
+              cursor: 'pointer', textAlign: 'left',
+              transition: 'all 150ms',
+              WebkitAppearance: 'none', appearance: 'none',
+            }}>
+              <span style={{ width: 6, height: 6, borderRadius: 1, background: T.cyan, opacity: 0.5 }} />
+              {ex}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ padding: '0 24px' }}>
+        <GlowButton onClick={onLaunch} disabled={!mission.trim()}>
+          Generate Launch Sequence
+          <svg width="14" height="14" viewBox="0 0 14 14"><path d="M2 7h10M8 3l4 4-4 4" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        </GlowButton>
+      </div>
+    </div>
+  );
+}
+
+
+// ─────────────────────────────────────────────────────────────
+// Screen 3 — Countdown (3-2-1-GO)
+// ─────────────────────────────────────────────────────────────
+function Countdown({ onComplete }) {
+  const [count, setCount] = useState(3);
+  const [phase, setPhase] = useState('count');
+
+  useEffect(() => {
+    if (phase !== 'count') return;
+    if (count === 0) {
+      setPhase('launch');
+      onComplete();
+      return;
+    }
+    const t = setTimeout(() => setCount(c => c - 1), 900);
+    return () => clearTimeout(t);
+  }, [count, phase]);
+
+  const display = phase === 'launch' ? 'GO' : (count === 0 ? 'GO' : count);
+  return (
+    <div style={{
+      flex: 1, display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center',
+      position: 'relative', overflow: 'hidden',
+    }}>
+      <div style={{
+        position: 'absolute', inset: 0,
+        background: `radial-gradient(circle at 50% 50%, rgba(0,229,255,0.18), transparent 55%)`,
+        animation: 'breathe 1.8s ease-in-out infinite',
+      }} />
+      {[0, 1, 2].map(i => (
+        <div key={i} style={{
+          position: 'absolute', width: 220 + i * 90, height: 220 + i * 90,
+          borderRadius: '50%', border: `1px solid ${T.hairline}`,
+          opacity: 1 - i * 0.25,
+          animation: `ringPulse 2s ease-out ${i * 0.25}s infinite`,
+        }} />
+      ))}
+      <Eyebrow color={T.cyan} style={{ position: 'absolute', top: 100 }}>
+        {phase === 'launch' ? 'Ignition' : 'Final Countdown'}
+      </Eyebrow>
+      <div key={display} style={{
+        fontFamily: T.display, fontSize: phase === 'launch' ? 120 : 180,
+        fontWeight: 600, letterSpacing: '-0.04em',
+        color: T.text, lineHeight: 1,
+        textShadow: `0 0 60px ${T.cyan}, 0 0 120px ${T.blue}`,
+        animation: 'countIn 700ms cubic-bezier(0.2, 0.8, 0.2, 1)',
+        position: 'relative', zIndex: 2,
+      }}>
+        {display}
+      </div>
+      <div style={{
+        fontFamily: T.mono, fontSize: 11, letterSpacing: '0.24em',
+        color: T.text3, marginTop: 24, textTransform: 'uppercase',
+        position: 'relative', zIndex: 2,
+      }}>
+        {phase === 'launch' ? 'Launch initiated · executing' : 'Engaging launch protocol'}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Screen 4 — Execution Step
+// ─────────────────────────────────────────────────────────────
+function ExecutionStep({ step, stepIdx, totalSteps, momentumGained, onComplete, onEditStep, mission }) {
+  const [exiting, setExiting] = useState(false);
+  const [entering, setEntering] = useState(true);
+  const [pulseMomentum, setPulseMomentum] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+
+  useEffect(() => { setEditOpen(false); }, [stepIdx]);
+
+  useEffect(() => {
+    setExiting(false);
+    setEntering(true);
+    const t = setTimeout(() => setEntering(false), 60);
+    return () => clearTimeout(t);
+  }, [stepIdx]);
+
+  useEffect(() => {
+    if (stepIdx === 0) return;
+    setPulseMomentum(true);
+    const t = setTimeout(() => setPulseMomentum(false), 900);
+    return () => clearTimeout(t);
+  }, [stepIdx]);
+
+  const handleComplete = () => {
+    if (exiting) return;
+    setExiting(true);
+    setTimeout(() => onComplete(), 320);
+  };
+
+  const progress = ((stepIdx + (exiting ? 1 : 0)) / totalSteps) * 100;
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '8px 0 24px', overflow: 'hidden', minHeight: 0 }}>
+      <Telemetry
+        time={`STEP ${String(stepIdx + 1).padStart(2, '0')}/${String(totalSteps).padStart(2, '0')}`}
+        code="EXEC / GUIDED"
+        state="LIVE"
+      />
+
+      <div style={{ padding: '20px 24px 0' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 12 }}>
+          <div>
+            <div style={{
+              fontFamily: T.mono, fontSize: 10, letterSpacing: '0.24em',
+              color: T.text3, textTransform: 'uppercase', marginBottom: 4,
+            }}>
+              ▸ Mission Execution
+            </div>
+            <div style={{
+              fontFamily: T.display, fontSize: 18, fontWeight: 600,
+              color: T.text, letterSpacing: '-0.01em', lineHeight: 1.1,
+            }}>
+              Step <span style={{ color: T.cyan }}>{stepIdx + 1}</span> of {totalSteps}
+            </div>
+          </div>
+
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', gap: 8,
+            padding: '8px 12px', borderRadius: 99,
+            background: 'rgba(0,229,255,0.08)',
+            border: `1px solid rgba(0,229,255,0.32)`,
+            boxShadow: pulseMomentum
+              ? `0 0 0 6px rgba(0,229,255,0.18), 0 0 24px ${T.cyan}`
+              : `0 0 16px rgba(0,229,255,0.18)`,
+            transition: 'box-shadow 600ms ease',
+          }}>
+            <span style={{
+              width: 6, height: 6, borderRadius: 99, background: T.teal,
+              boxShadow: `0 0 8px ${T.teal}`,
+            }} />
+            <span style={{
+              fontFamily: T.mono, fontSize: 11, letterSpacing: '0.16em',
+              fontWeight: 600, color: T.text, fontVariantNumeric: 'tabular-nums',
+              transform: pulseMomentum ? 'scale(1.1)' : 'scale(1)',
+              transition: 'transform 400ms cubic-bezier(0.2, 0.8, 0.2, 1)',
+              display: 'inline-block',
+            }}>
+              +{momentumGained} <span style={{ color: T.cyan, marginLeft: 2 }}>Momentum</span>
+            </span>
+          </div>
+        </div>
+
+        <div style={{
+          height: 6, borderRadius: 99,
+          background: 'rgba(255,255,255,0.06)', overflow: 'hidden',
+          border: `1px solid ${T.hairlineSoft}`,
+        }}>
+          <div style={{
+            height: '100%', width: `${progress}%`,
+            background: `linear-gradient(90deg, ${T.cyan}, ${T.blue} 60%, ${T.purple})`,
+            boxShadow: `0 0 12px ${T.cyan}99`,
+            transition: 'width 600ms cubic-bezier(0.2, 0.8, 0.2, 1)',
+            position: 'relative',
+          }}>
+            <div style={{
+              position: 'absolute', right: -2, top: -3, bottom: -3, width: 10,
+              background: `radial-gradient(circle, ${T.cyan}, transparent 70%)`,
+              filter: 'blur(2px)',
+            }} />
+          </div>
+        </div>
+
+        <div style={{
+          fontFamily: T.mono, fontSize: 10, letterSpacing: '0.18em',
+          color: T.text3, textTransform: 'uppercase', marginTop: 12,
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+        }}>
+          MSN · {mission}
+        </div>
+      </div>
+
+      <div style={{
+        flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '20px 24px', position: 'relative', minHeight: 0,
+      }}>
+        <div style={{
+          position: 'absolute', width: 360, height: 360, borderRadius: '50%',
+          background: `radial-gradient(circle, rgba(0,229,255,0.18), rgba(168,118,255,0.08) 40%, transparent 70%)`,
+          animation: 'breathe 3.2s ease-in-out infinite',
+          pointerEvents: 'none',
+        }} />
+
+        <div key={stepIdx} style={{
+          position: 'relative', width: '100%', height: '100%',
+          maxHeight: 460,
+          background: 'linear-gradient(160deg, rgba(255,255,255,0.07), rgba(255,255,255,0.025) 60%, rgba(0,229,255,0.04))',
+          border: `1px solid rgba(0,229,255,0.32)`,
+          borderRadius: 28,
+          display: 'flex', flexDirection: 'column',
+          padding: '28px 24px 32px',
+          boxShadow: `
+            0 0 0 1px rgba(255,255,255,0.04) inset,
+            0 30px 80px rgba(0,229,255,0.12),
+            0 8px 32px rgba(0,0,0,0.5),
+            inset 0 1px 0 rgba(255,255,255,0.08)
+          `,
+          backdropFilter: 'blur(20px)',
+          WebkitBackdropFilter: 'blur(20px)',
+          overflow: 'hidden',
+          transform: exiting ? 'translateY(-24px) scale(0.96)' : entering ? 'translateY(20px) scale(0.97)' : 'translateY(0) scale(1)',
+          opacity: exiting ? 0 : entering ? 0 : 1,
+          transition: 'transform 380ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 320ms ease',
+        }}>
+          <div style={{
+            position: 'absolute', top: -80, left: '50%', transform: 'translateX(-50%)',
+            width: 280, height: 200,
+            background: `radial-gradient(ellipse, rgba(0,229,255,0.35), transparent 70%)`,
+            pointerEvents: 'none',
+          }} />
+          {[
+            { top: 14, left: 14, b: 'l', r: 't' },
+            { top: 14, right: 14, b: 'r', r: 't' },
+            { bottom: 14, left: 14, b: 'l', r: 'b' },
+            { bottom: 14, right: 14, b: 'r', r: 'b' },
+          ].map((c, i) => (
+            <div key={i} style={{
+              position: 'absolute',
+              top: c.top, left: c.left, right: c.right, bottom: c.bottom,
+              width: 14, height: 14,
+              borderTop: c.r === 't' ? `1px solid ${T.cyan}88` : 'none',
+              borderBottom: c.r === 'b' ? `1px solid ${T.cyan}88` : 'none',
+              borderLeft: c.b === 'l' ? `1px solid ${T.cyan}88` : 'none',
+              borderRight: c.b === 'r' ? `1px solid ${T.cyan}88` : 'none',
+            }} />
+          ))}
+
+          <div style={{
+            display: 'inline-flex', alignSelf: 'flex-start', alignItems: 'center', gap: 10,
+            padding: '6px 12px 6px 8px', borderRadius: 99,
+            background: 'rgba(0,229,255,0.12)',
+            border: `1px solid rgba(0,229,255,0.4)`,
+            position: 'relative', zIndex: 1,
+          }}>
+            <span style={{
+              width: 22, height: 22, borderRadius: 99,
+              background: `linear-gradient(180deg, ${T.cyan}, ${T.blue})`,
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              fontFamily: T.mono, fontSize: 11, fontWeight: 700, color: '#001018',
+            }}>
+              {stepIdx + 1}
+            </span>
+            <span style={{
+              fontFamily: T.mono, fontSize: 10, letterSpacing: '0.22em',
+              color: T.cyan, textTransform: 'uppercase', fontWeight: 600,
+            }}>
+              {step.tag} · CHECKPOINT
+            </span>
+          </div>
+
+          <div style={{
+            flex: 1, display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center',
+            position: 'relative', zIndex: 1, padding: '0 4px',
+          }}>
+            <div style={{
+              fontFamily: T.mono, fontSize: 10, letterSpacing: '0.32em',
+              color: T.teal, textTransform: 'uppercase', marginBottom: 18,
+              textShadow: `0 0 12px ${T.teal}88`,
+            }}>
+              ▸ Now do this
+            </div>
+            <h2 style={{
+              fontFamily: T.display, fontWeight: 600,
+              fontSize: 36, lineHeight: 1.1, letterSpacing: '-0.025em',
+              color: T.text, margin: 0, textAlign: 'center',
+              textShadow: `0 0 40px rgba(0,229,255,0.4)`,
+            }}>
+              {step.title}
+            </h2>
+            {step.hint && (
+              <p style={{
+                fontFamily: T.display, fontSize: 14, color: T.text2,
+                margin: '14px 0 0', textAlign: 'center', maxWidth: 280, lineHeight: 1.4,
+              }}>
+                {step.hint}
+              </p>
+            )}
+          </div>
+
+          <div style={{
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            fontFamily: T.mono, fontSize: 9.5, letterSpacing: '0.22em',
+            color: T.text3, textTransform: 'uppercase', position: 'relative', zIndex: 1,
+          }}>
+            <button onClick={() => setEditOpen(true)} style={{
+              all: 'unset', cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              padding: '6px 10px', borderRadius: 99,
+              background: 'rgba(168,118,255,0.08)',
+              border: `1px solid rgba(168,118,255,0.32)`,
+              color: T.purple,
+              fontFamily: T.mono, fontSize: 9.5, letterSpacing: '0.2em',
+              textTransform: 'uppercase', fontWeight: 600,
+              transition: 'all 200ms ease',
+              WebkitTapHighlightColor: 'transparent',
+            }}>
+              <svg width="10" height="10" viewBox="0 0 10 10" style={{ flexShrink: 0 }}>
+                <path d="M1 9l1.5-3.5L7 1l2 2-4.5 4.5L1 9z" stroke="currentColor" strokeWidth="1" fill="none" strokeLinejoin="round"/>
+              </svg>
+              Edit step
+            </button>
+            <span>+{step.reward} on complete</span>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ padding: '0 24px' }}>
+        <GlowButton onClick={handleComplete}>
+          {stepIdx + 1 === totalSteps ? 'Complete Final Step' : 'Completed'}
+          <svg width="14" height="14" viewBox="0 0 14 14">
+            <path d="M2 7.5l3 3 7-7" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        </GlowButton>
+        <div style={{
+          textAlign: 'center', marginTop: 12,
+          fontFamily: T.mono, fontSize: 10, letterSpacing: '0.2em',
+          color: T.text3, textTransform: 'uppercase',
+        }}>
+          {stepIdx + 1 < totalSteps
+            ? `${totalSteps - stepIdx - 1} more checkpoint${totalSteps - stepIdx - 1 === 1 ? '' : 's'} to go`
+            : 'Final checkpoint · launch nearly complete'}
+        </div>
+      </div>
+
+      <EditStepModal
+        open={editOpen}
+        step={step}
+        stepIdx={stepIdx}
+        totalSteps={totalSteps}
+        onClose={() => setEditOpen(false)}
+        onPick={(newTitle) => {
+          onEditStep(newTitle);
+          setEditOpen(false);
+        }}
+      />
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Quick Edit Modal
+// ─────────────────────────────────────────────────────────────
+function EditStepModal({ open, step, stepIdx, totalSteps, onClose, onPick }) {
+  const [altIdx, setAltIdx] = useState(0);
+  const [customDraft, setCustomDraft] = useState('');
+  const [listening, setListening] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const recognitionRef = useRef(null);
+
+  const speechAvailable = useMemo(
+    () => typeof window !== 'undefined' && !!(window.SpeechRecognition || window.webkitSpeechRecognition),
+    []
+  );
+
+  useEffect(() => {
+    if (open) {
+      setAltIdx(0);
+      setCustomDraft('');
+      setListening(false);
+      setRefreshing(false);
+    }
+  }, [open, stepIdx]);
+
+  // Web Speech API lifecycle — start when listening flips true, stop when false.
+  useEffect(() => {
+    if (!listening) return;
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { setListening(false); return; }
+
+    const rec = new SR();
+    rec.continuous = false;
+    rec.interimResults = true;
+    rec.lang = navigator.language || 'en-US';
+
+    let finalText = '';
+    rec.onresult = (e) => {
+      let interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const r = e.results[i];
+        if (r.isFinal) finalText += r[0].transcript;
+        else interim += r[0].transcript;
+      }
+      setCustomDraft((finalText + interim).trimStart());
+    };
+    rec.onend = () => setListening(false);
+    rec.onerror = (e) => {
+      if (e.error !== 'no-speech' && e.error !== 'aborted') {
+        console.warn('Speech recognition error:', e.error);
+      }
+      setListening(false);
+    };
+
+    recognitionRef.current = rec;
+    try { rec.start(); } catch (err) {
+      console.warn('Could not start recognition:', err);
+      setListening(false);
+    }
+
+    return () => {
+      rec.onresult = rec.onend = rec.onerror = null;
+      try { rec.stop(); } catch {}
+      if (recognitionRef.current === rec) recognitionRef.current = null;
+    };
+  }, [listening]);
+
+  if (!open || !step) return null;
+
+  const pool = step.altPool || [];
+  const start = pool.length ? (altIdx * 3) % pool.length : 0;
+  const currentAlts = [];
+  for (let i = 0; i < Math.min(3, pool.length); i++) {
+    const v = pool[(start + i) % pool.length];
+    if (v && v !== step.title) currentAlts.push(v);
+  }
+  let j = 0;
+  while (currentAlts.length < Math.min(3, pool.length) && j < pool.length) {
+    const v = pool[(start + Math.min(3, pool.length) + j) % pool.length];
+    if (v && v !== step.title && !currentAlts.includes(v)) currentAlts.push(v);
+    j++;
+  }
+
+  const handleRegenerate = () => {
+    setRefreshing(true);
+    setTimeout(() => {
+      setAltIdx(i => i + 1);
+      setRefreshing(false);
+    }, 320);
+  };
+
+  const handleCustomSubmit = () => {
+    const t = customDraft.trim();
+    if (!t) return;
+    onPick(t);
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 50,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: 20,
+        background: 'rgba(2,4,8,0.62)',
+        backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
+        animation: 'backdropIn 220ms ease',
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          width: '100%', maxWidth: 360,
+          background: 'linear-gradient(160deg, rgba(255,255,255,0.08), rgba(255,255,255,0.025) 55%, rgba(0,229,255,0.05))',
+          border: `1px solid rgba(0,229,255,0.42)`,
+          borderRadius: 24,
+          padding: '18px 16px 16px',
+          boxShadow: `
+            0 0 0 1px rgba(255,255,255,0.05) inset,
+            0 30px 80px rgba(0,0,0,0.6),
+            0 0 60px rgba(0,229,255,0.18)
+          `,
+          backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)',
+          animation: 'modalIn 280ms cubic-bezier(0.2,0.8,0.2,1)',
+          position: 'relative', overflow: 'hidden',
+        }}
+      >
+        <div style={{
+          position: 'absolute', top: -60, left: '50%', transform: 'translateX(-50%)',
+          width: 240, height: 160,
+          background: `radial-gradient(ellipse, rgba(0,229,255,0.28), transparent 70%)`,
+          pointerEvents: 'none',
+        }} />
+
+        <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{
+              width: 6, height: 6, borderRadius: 99, background: T.teal,
+              boxShadow: `0 0 8px ${T.teal}`,
+            }} />
+            <span style={{
+              fontFamily: T.mono, fontSize: 9.5, letterSpacing: '0.24em',
+              color: T.teal, textTransform: 'uppercase', fontWeight: 600,
+              textShadow: `0 0 8px ${T.teal}66`,
+            }}>Quick Edit</span>
+            <span style={{
+              fontFamily: T.mono, fontSize: 9.5, letterSpacing: '0.2em',
+              color: T.text3, textTransform: 'uppercase',
+            }}>· Step {stepIdx + 1}/{totalSteps}</span>
+          </div>
+          <button onClick={onClose} aria-label="Close" style={{
+            all: 'unset', cursor: 'pointer',
+            width: 28, height: 28, borderRadius: 99,
+            background: 'rgba(255,255,255,0.05)',
+            border: `1px solid ${T.hairlineSoft}`,
+            color: T.text2,
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <svg width="9" height="9" viewBox="0 0 10 10"><path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>
+          </button>
+        </div>
+
+        <div style={{ position: 'relative', marginBottom: 14, paddingBottom: 12, borderBottom: `1px solid ${T.hairlineSoft}` }}>
+          <div style={{
+            fontFamily: T.mono, fontSize: 9, letterSpacing: '0.22em',
+            color: T.text3, textTransform: 'uppercase', marginBottom: 4,
+          }}>Currently</div>
+          <div style={{
+            fontFamily: T.display, fontSize: 14, color: T.text2, fontWeight: 500,
+            lineHeight: 1.3,
+          }}>{step.title}</div>
+        </div>
+
+        <div style={{ position: 'relative', marginBottom: 14 }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10,
+            fontFamily: T.mono, fontSize: 10, letterSpacing: '0.22em',
+            color: T.cyan, textTransform: 'uppercase', fontWeight: 600,
+          }}>
+            <span style={{ width: 4, height: 4, borderRadius: 99, background: T.cyan, boxShadow: `0 0 6px ${T.cyan}` }} />
+            Better options
+          </div>
+          <div style={{
+            display: 'flex', flexDirection: 'column', gap: 8,
+            opacity: refreshing ? 0.35 : 1,
+            transition: 'opacity 240ms ease',
+          }}>
+            {currentAlts.map((a, i) => (
+              <button
+                key={`${altIdx}-${i}-${a}`}
+                onClick={() => onPick(a)}
+                style={{
+                  all: 'unset', cursor: 'pointer',
+                  padding: '11px 14px',
+                  background: 'rgba(0,229,255,0.05)',
+                  border: `1px solid rgba(0,229,255,0.22)`,
+                  borderRadius: 12,
+                  fontFamily: T.display, fontSize: 14, fontWeight: 500, color: T.text,
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+                  transition: 'all 200ms ease',
+                  animation: `optionIn 280ms ${i * 60}ms cubic-bezier(0.2,0.8,0.2,1) backwards`,
+                }}
+              >
+                <span style={{ flex: 1 }}>{a}</span>
+                <svg width="12" height="12" viewBox="0 0 12 12" style={{ flexShrink: 0, color: T.cyan }}>
+                  <path d="M2 6h7m0 0L6 3m3 3L6 9" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <button
+          onClick={handleRegenerate}
+          disabled={refreshing}
+          style={{
+            cursor: refreshing ? 'default' : 'pointer',
+            position: 'relative',
+            width: '100%', padding: '11px 14px',
+            boxSizing: 'border-box',
+            background: 'rgba(168,118,255,0.10)',
+            border: `1px solid rgba(168,118,255,0.34)`,
+            borderRadius: 12,
+            fontFamily: T.mono, fontSize: 10.5, letterSpacing: '0.18em',
+            color: T.purple, textTransform: 'uppercase', fontWeight: 600,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            marginBottom: 16,
+            WebkitAppearance: 'none', appearance: 'none',
+            WebkitTapHighlightColor: 'transparent',
+          }}
+        >
+          <svg width="12" height="12" viewBox="0 0 12 12" style={{
+            animation: refreshing ? 'spin360 600ms ease' : 'none',
+          }}>
+            <path d="M10 6a4 4 0 1 1-1.2-2.85M10 1.5V4H7.5" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+          {refreshing ? 'Regenerating…' : 'Generate new options'}
+        </button>
+
+        <div style={{
+          fontFamily: T.mono, fontSize: 9.5, letterSpacing: '0.22em',
+          color: T.text3, textTransform: 'uppercase', marginBottom: 8,
+          position: 'relative',
+        }}>Or write your own</div>
+        <div style={{
+          position: 'relative',
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '8px 8px 8px 12px',
+          background: 'rgba(255,255,255,0.04)',
+          border: `1px solid ${listening ? T.teal : T.hairlineSoft}`,
+          borderRadius: 12,
+          boxShadow: listening ? `0 0 0 3px ${T.teal}33, 0 0 20px ${T.teal}55` : 'none',
+          transition: 'all 220ms ease',
+        }}>
+          <input
+            type="text"
+            value={customDraft}
+            onChange={e => setCustomDraft(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') handleCustomSubmit(); }}
+            placeholder="Type a different step…"
+            enterKeyHint="done"
+            style={{
+              all: 'unset',
+              flex: 1, minWidth: 0,
+              fontFamily: T.display, fontSize: 14, color: T.text,
+              padding: '4px 0',
+            }}
+          />
+          {!listening && customDraft.trim() ? (
+            <button onClick={handleCustomSubmit} aria-label="Submit" style={{
+              all: 'unset', cursor: 'pointer', flexShrink: 0,
+              width: 30, height: 30, borderRadius: 99,
+              background: `linear-gradient(180deg, ${T.cyan}, ${T.blue})`,
+              color: '#001018',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              boxShadow: `0 0 12px ${T.cyan}99`,
+            }}>
+              <svg width="13" height="13" viewBox="0 0 13 13">
+                <path d="M2 6.5l3 3 6-7" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </button>
+          ) : speechAvailable ? (
+            <button
+              onClick={() => setListening(l => !l)}
+              aria-label={listening ? 'Stop voice input' : 'Voice input'}
+              style={{
+                all: 'unset', cursor: 'pointer', flexShrink: 0,
+                width: 30, height: 30, borderRadius: 99,
+                background: listening ? `linear-gradient(180deg, ${T.teal}, ${T.cyan})` : 'rgba(255,255,255,0.06)',
+                border: `1px solid ${listening ? 'transparent' : T.hairlineSoft}`,
+                color: listening ? '#001018' : T.text2,
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                transition: 'all 220ms ease',
+                boxShadow: listening ? `0 0 12px ${T.teal}99` : 'none',
+              }}
+            >
+              <svg width="13" height="13" viewBox="0 0 14 14">
+                <path d="M7 1.8a1.9 1.9 0 0 0-1.9 1.9v3.2a1.9 1.9 0 1 0 3.8 0V3.7A1.9 1.9 0 0 0 7 1.8z" fill="currentColor"/>
+                <path d="M3.5 7a3.5 3.5 0 0 0 7 0M7 10.5V12.4M5 12.4h4" stroke="currentColor" strokeWidth="1.2" fill="none" strokeLinecap="round"/>
+              </svg>
+            </button>
+          ) : null}
+        </div>
+        {listening && (
+          <div style={{
+            fontFamily: T.mono, fontSize: 10, letterSpacing: '0.22em',
+            color: T.teal, textTransform: 'uppercase', marginTop: 8, textAlign: 'center',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+          }}>
+            <span style={{
+              width: 5, height: 5, borderRadius: 99, background: T.teal,
+              boxShadow: `0 0 8px ${T.teal}`,
+              animation: 'pulse 1.2s ease-in-out infinite',
+            }} />
+            Listening…
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Screen 5 — Reward
+// ─────────────────────────────────────────────────────────────
+function Reward({ onNext, onLog, momentum }) {
+  const [tickedNum, setTickedNum] = useState(0);
+  useEffect(() => {
+    let n = 0;
+    const id = setInterval(() => {
+      n += 1;
+      setTickedNum(n);
+      if (n >= 15) clearInterval(id);
+    }, 60);
+    return () => clearInterval(id);
+  }, []);
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden', minHeight: 0 }}>
+      <Telemetry time="04:34:11 UTC" code="MC-04 / SUCCESS" state="COMPLETE" />
+
+      <div style={{
+        position: 'absolute', top: '38%', left: '50%', transform: 'translate(-50%, -50%)',
+        width: 600, height: 600, pointerEvents: 'none',
+      }}>
+        {Array.from({ length: 12 }).map((_, i) => (
+          <div key={i} style={{
+            position: 'absolute', left: '50%', top: '50%',
+            width: 2, height: 200,
+            background: `linear-gradient(180deg, transparent, ${i % 2 ? T.cyan : T.blue}88, transparent)`,
+            transformOrigin: '50% 0%',
+            transform: `translate(-50%, 0) rotate(${i * 30}deg) translateY(40px)`,
+            opacity: 0.6,
+            animation: `rayPulse 2.4s ease-in-out ${i * 0.05}s infinite`,
+          }} />
+        ))}
+      </div>
+
+      <div style={{
+        position: 'absolute', top: '20%', left: '50%', transform: 'translateX(-50%)',
+        width: 380, height: 380,
+        background: `radial-gradient(circle, rgba(0,229,255,0.35), rgba(168,118,255,0.1) 40%, transparent 65%)`,
+        animation: 'breathe 2.4s ease-in-out infinite',
+      }} />
+
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 24px', position: 'relative', minHeight: 0 }}>
+        <Eyebrow color={T.teal} style={{ marginBottom: 24 }}>Launch Successful</Eyebrow>
+
+        <div style={{ position: 'relative', display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 8 }}>
+          <span style={{
+            fontFamily: T.display, fontSize: 28, fontWeight: 500,
+            color: T.cyan, marginRight: -2,
+            textShadow: `0 0 24px ${T.cyan}`,
+          }}>+</span>
+          <span style={{
+            fontFamily: T.display, fontSize: 130, fontWeight: 600,
+            letterSpacing: '-0.05em', lineHeight: 1, color: T.text,
+            textShadow: `0 0 50px ${T.cyan}, 0 0 90px ${T.blue}66`,
+            fontVariantNumeric: 'tabular-nums',
+          }}>{tickedNum}</span>
+        </div>
+        <div style={{
+          fontFamily: T.mono, fontSize: 12, letterSpacing: '0.32em',
+          color: T.cyan, textTransform: 'uppercase',
+          textShadow: `0 0 12px ${T.cyan}`,
+        }}>
+          Momentum
+        </div>
+
+        <div style={{
+          marginTop: 28, textAlign: 'center', maxWidth: 280,
+          fontFamily: T.display, fontSize: 18, fontWeight: 500,
+          color: T.text, lineHeight: 1.3, letterSpacing: '-0.005em',
+        }}>
+          Launch successful. <br/>
+          <span style={{ color: T.text2 }}>Momentum increasing.</span>
+        </div>
+
+        <div style={{
+          display: 'flex', gap: 0, marginTop: 32,
+          background: T.surface, border: `1px solid ${T.hairline}`,
+          borderRadius: 16, overflow: 'hidden',
+        }}>
+          {[
+            ['Score', momentum + 15, '+15'],
+            ['Today', '3', '+1'],
+            ['Streak', '7d', '↗'],
+          ].map(([label, val, delta], i, arr) => (
+            <div key={label} style={{
+              padding: '12px 18px', textAlign: 'center',
+              borderRight: i < arr.length - 1 ? `1px solid ${T.hairlineSoft}` : 'none',
+            }}>
+              <div style={{ fontFamily: T.mono, fontSize: 9, letterSpacing: '0.2em', color: T.text3, textTransform: 'uppercase' }}>{label}</div>
+              <div style={{ fontFamily: T.display, fontSize: 20, fontWeight: 600, color: T.text, marginTop: 2 }}>{val}</div>
+              <div style={{ fontFamily: T.mono, fontSize: 9, color: T.teal, marginTop: 2, letterSpacing: '0.1em' }}>{delta}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 10, padding: '0 24px 0' }}>
+        <button onClick={onLog} style={{
+          flex: 1, height: 56, borderRadius: 16,
+          background: T.surface, border: `1px solid ${T.hairline}`,
+          color: T.text, fontFamily: T.display, fontSize: 14, fontWeight: 600,
+          letterSpacing: '0.04em', textTransform: 'uppercase', cursor: 'pointer',
+          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
+          WebkitTapHighlightColor: 'transparent',
+        }}>
+          Log Progress
+        </button>
+        <GlowButton onClick={onNext} style={{ flex: 1, height: 56 }}>
+          Next Phase
+          <svg width="14" height="14" viewBox="0 0 14 14"><path d="M2 7h10M8 3l4 4-4 4" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        </GlowButton>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Screen 6 — Momentum Dashboard
+// ─────────────────────────────────────────────────────────────
+const STATES = [
+  { id: 'idle',    label: 'Idle',        color: T.text3,  hint: 'No active momentum' },
+  { id: 'warm',    label: 'Warming Up',  color: T.warn,   hint: '1+ launch today'    },
+  { id: 'engaged', label: 'Engaged',     color: T.cyan,   hint: '3+ launches today'  },
+  { id: 'locked',  label: 'Locked In',   color: T.purple, hint: '5+ launches today'  },
+];
+
+function Dashboard({ momentum, launchesToday, onNewMission }) {
+  const stateIdx = launchesToday >= 5 ? 3 : launchesToday >= 3 ? 2 : launchesToday >= 1 ? 1 : 0;
+  const state = STATES[stateIdx];
+
+  const days = [
+    { d: 'M', v: 2 }, { d: 'T', v: 4 }, { d: 'W', v: 1 }, { d: 'T', v: 3 },
+    { d: 'F', v: 5 }, { d: 'S', v: 2 }, { d: 'S', v: launchesToday, today: true },
+  ];
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'auto', minHeight: 0 }}>
+      <div style={{ paddingTop: 8 }}>
+        <Telemetry time="04:35:02 UTC" code={`MC-04 / ${state.label.toUpperCase()}`} state="DASHBOARD" />
+      </div>
+
+      <div style={{ padding: '20px 24px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <Eyebrow color={state.color} style={{ marginBottom: 8 }}>Momentum State</Eyebrow>
+          <h1 style={{
+            fontFamily: T.display, fontSize: 32, fontWeight: 600,
+            color: T.text, margin: 0, letterSpacing: '-0.02em',
+          }}>
+            {state.label}
+          </h1>
+        </div>
+        <button style={{
+          width: 44, height: 44, borderRadius: 14,
+          background: T.surface, border: `1px solid ${T.hairline}`,
+          color: T.text2, cursor: 'pointer', display: 'inline-flex',
+          alignItems: 'center', justifyContent: 'center',
+        }}>
+          <svg width="18" height="18" viewBox="0 0 18 18">
+            <circle cx="9" cy="4" r="1.3" fill="currentColor"/>
+            <circle cx="9" cy="9" r="1.3" fill="currentColor"/>
+            <circle cx="9" cy="14" r="1.3" fill="currentColor"/>
+          </svg>
+        </button>
+      </div>
+
+      <div style={{ padding: '20px 24px 0' }}>
+        <div style={{
+          position: 'relative',
+          background: 'linear-gradient(160deg, rgba(0,229,255,0.10), rgba(168,118,255,0.06) 60%, rgba(255,255,255,0.02))',
+          border: `1px solid ${T.hairline}`,
+          borderRadius: 22, padding: '22px 22px 24px', overflow: 'hidden',
+          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
+        }}>
+          <div style={{
+            position: 'absolute', top: -60, right: -60,
+            width: 200, height: 200, borderRadius: '50%',
+            background: `radial-gradient(circle, ${state.color}33, transparent 70%)`,
+          }} />
+          <div style={{
+            fontFamily: T.mono, fontSize: 10, letterSpacing: '0.24em',
+            color: T.text3, textTransform: 'uppercase', marginBottom: 8,
+          }}>
+            ▸ Momentum Score
+          </div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+            <div style={{
+              fontFamily: T.display, fontSize: 76, fontWeight: 600,
+              letterSpacing: '-0.04em', lineHeight: 1, color: T.text,
+              fontVariantNumeric: 'tabular-nums',
+              textShadow: `0 0 30px ${state.color}66`,
+            }}>{momentum}</div>
+            <div style={{
+              fontFamily: T.mono, fontSize: 11, color: T.teal, letterSpacing: '0.12em',
+            }}>
+              +47 / 7d
+            </div>
+          </div>
+
+          <div style={{ marginTop: 16 }}>
+            <div style={{
+              display: 'flex', justifyContent: 'space-between',
+              fontFamily: T.mono, fontSize: 9, letterSpacing: '0.18em',
+              color: T.text3, textTransform: 'uppercase', marginBottom: 6,
+            }}>
+              <span>Today's pulse</span>
+              <span>{launchesToday} launches</span>
+            </div>
+            <div style={{ display: 'flex', gap: 4, height: 36, alignItems: 'flex-end' }}>
+              {days.map((d, i) => {
+                const h = 6 + d.v * 6;
+                return (
+                  <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                    <div style={{
+                      width: '100%', height: h,
+                      background: d.today
+                        ? `linear-gradient(180deg, ${T.cyan}, ${T.blue})`
+                        : 'rgba(255,255,255,0.12)',
+                      borderRadius: 3,
+                      boxShadow: d.today ? `0 0 12px ${T.cyan}` : 'none',
+                    }} />
+                    <div style={{ fontFamily: T.mono, fontSize: 9, color: d.today ? T.cyan : T.text3 }}>{d.d}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ padding: '18px 24px 0' }}>
+        <div style={{
+          fontFamily: T.mono, fontSize: 10, letterSpacing: '0.24em',
+          color: T.text3, textTransform: 'uppercase', marginBottom: 10,
+        }}>
+          ▸ State Progression
+        </div>
+        <div style={{
+          background: T.surface, border: `1px solid ${T.hairline}`,
+          borderRadius: 16, padding: '16px 14px',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+            {STATES.map((s, i) => {
+              const reached = i <= stateIdx;
+              return (
+                <React.Fragment key={s.id}>
+                  <div style={{
+                    width: 10, height: 10, borderRadius: 99,
+                    background: reached ? s.color : 'rgba(255,255,255,0.1)',
+                    boxShadow: reached ? `0 0 12px ${s.color}` : 'none',
+                    flexShrink: 0,
+                    border: i === stateIdx ? `2px solid ${T.text}` : 'none',
+                    outline: i === stateIdx ? `2px solid ${s.color}66` : 'none',
+                    outlineOffset: 2,
+                  }} />
+                  {i < STATES.length - 1 && (
+                    <div style={{
+                      flex: 1, height: 1.5,
+                      background: i < stateIdx
+                        ? `linear-gradient(90deg, ${STATES[i].color}, ${STATES[i+1].color})`
+                        : 'rgba(255,255,255,0.08)',
+                    }} />
+                  )}
+                </React.Fragment>
+              );
+            })}
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            {STATES.map((s, i) => (
+              <div key={s.id} style={{
+                fontFamily: T.mono, fontSize: 8.5, letterSpacing: '0.14em',
+                color: i === stateIdx ? s.color : T.text3,
+                textTransform: 'uppercase',
+                fontWeight: i === stateIdx ? 600 : 400,
+              }}>
+                {s.label.split(' ')[0]}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ padding: '18px 24px 0' }}>
+        <div style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10,
+        }}>
+          <div style={{
+            fontFamily: T.mono, fontSize: 10, letterSpacing: '0.24em',
+            color: T.text3, textTransform: 'uppercase',
+          }}>
+            ▸ Recent Launches
+          </div>
+          <div style={{ fontFamily: T.mono, fontSize: 10, color: T.text3, letterSpacing: '0.18em' }}>
+            VIEW ALL
+          </div>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {[
+            { name: 'Finish proposal deck',   t: '2m ago',  dur: '1:30', mom: 15 },
+            { name: 'Reply to Sarah',          t: '14m ago', dur: '0:45', mom: 8  },
+            { name: 'Outline Q3 review',       t: '1h ago',  dur: '1:30', mom: 15 },
+          ].map((m, i) => (
+            <div key={i} style={{
+              display: 'flex', alignItems: 'center', gap: 12,
+              background: T.surface, border: `1px solid ${T.hairlineSoft}`,
+              borderRadius: 14, padding: '12px 14px',
+            }}>
+              <div style={{
+                width: 32, height: 32, borderRadius: 10,
+                background: 'rgba(0,229,255,0.1)',
+                border: `1px solid ${T.hairline}`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <svg width="12" height="12" viewBox="0 0 12 12">
+                  <path d="M6 1l4 5h-2.5v5h-3V6H2l4-5z" fill={T.cyan}/>
+                </svg>
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{
+                  fontFamily: T.display, fontSize: 14, fontWeight: 500, color: T.text,
+                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                }}>
+                  {m.name}
+                </div>
+                <div style={{ fontFamily: T.mono, fontSize: 10, color: T.text3, letterSpacing: '0.1em', marginTop: 2 }}>
+                  {m.t} · {m.dur}
+                </div>
+              </div>
+              <div style={{
+                fontFamily: T.mono, fontSize: 11, fontWeight: 600,
+                color: T.teal, letterSpacing: '0.04em',
+              }}>
+                +{m.mom}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ padding: '20px 24px 24px', marginTop: 'auto' }}>
+        <GlowButton onClick={onNewMission}>
+          New Mission
+          <svg width="14" height="14" viewBox="0 0 14 14"><path d="M7 1l5 6h-3v6H5V7H2l5-6z" fill="currentColor"/></svg>
+        </GlowButton>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Bottom nav
+// ─────────────────────────────────────────────────────────────
+function BottomNav({ screen, onNav }) {
+  const items = [
+    { id: 'input', label: 'Launch',
+      icon: <path d="M9 1l6 7h-4v8H7V8H3l6-7z" fill="currentColor"/> },
+    { id: 'dashboard', label: 'Momentum',
+      icon: <g><rect x="2" y="9" width="3" height="7" rx="1" fill="currentColor"/><rect x="7.5" y="5" width="3" height="11" rx="1" fill="currentColor"/><rect x="13" y="2" width="3" height="14" rx="1" fill="currentColor"/></g> },
+  ];
+  return (
+    <div style={{
+      position: 'absolute', bottom: 'max(16px, env(safe-area-inset-bottom))', left: 24, right: 24,
+      height: 60, borderRadius: 22, padding: 6,
+      background: 'rgba(255,255,255,0.04)', backdropFilter: 'blur(20px)',
+      WebkitBackdropFilter: 'blur(20px)',
+      border: `1px solid ${T.hairline}`,
+      display: 'flex', gap: 6,
+      boxShadow: '0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05)',
+      zIndex: 5,
+    }}>
+      {items.map(it => {
+        const active = it.id === screen;
+        return (
+          <button key={it.id} onClick={() => onNav(it.id)} style={{
+            flex: 1, borderRadius: 16, border: 'none',
+            background: active
+              ? 'linear-gradient(180deg, rgba(0,229,255,0.18), rgba(61,127,255,0.10))'
+              : 'transparent',
+            color: active ? T.text : T.text2,
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            fontFamily: T.display, fontSize: 13, fontWeight: 500, letterSpacing: '0.02em',
+            cursor: 'pointer',
+            boxShadow: active ? `inset 0 0 0 1px rgba(0,229,255,0.3), 0 0 24px rgba(0,229,255,0.12)` : 'none',
+            WebkitTapHighlightColor: 'transparent',
+          }}>
+            <svg width="16" height="16" viewBox="0 0 18 18">{it.icon}</svg>
+            {it.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Step library — generates 4 micro-steps from mission text
+// ─────────────────────────────────────────────────────────────
+function generateSteps(mission) {
+  if (!mission) return [];
+  const lower = mission.toLowerCase();
+  if (lower.includes('proposal') || lower.includes('deck')) {
+    return [
+      { tag: 'OPEN', title: 'Open proposal document', hint: "Just open the file. That's it.", reward: 4,
+        altPool: ['Locate latest WSI file', 'Start proposal draft', 'Open template folder', "Resume yesterday's draft", 'Pull up the client brief', 'Open meeting notes'] },
+      { tag: 'SCAN', title: 'Review previous edits', hint: "Skim — don't fix anything yet.", reward: 4,
+        altPool: ['Skim last paragraph only', 'Read the conclusion first', 'Check the open comments', 'Diff against yesterday', 'Note any TODOs', 'Re-read your last note'] },
+      { tag: 'EXEC', title: 'Rewrite title slide', hint: 'One sentence is enough.', reward: 4,
+        altPool: ['Add one bullet point', 'Fix the opening line', 'Change one heading', 'Insert one image placeholder', 'Outline section 2', 'Tighten the intro'] },
+      { tag: 'PUSH', title: 'Save progress', hint: 'Cmd+S. Lock it in.', reward: 3,
+        altPool: ['Export to PDF', 'Share with team', 'Save and close', 'Push to drive', 'Snapshot a backup', 'Add changelog note'] },
+    ];
+  }
+  if (lower.includes('email') || lower.includes('reply') || lower.includes('follow')) {
+    return [
+      { tag: 'OPEN', title: 'Open inbox, full screen', hint: 'Phone face down.', reward: 4,
+        altPool: ['Mute notifications', 'Search the thread', 'Star the message', 'Open the relevant doc', 'Pull up the contract'] },
+      { tag: 'SCAN', title: 'Re-read the last message', hint: 'No drafting yet.', reward: 4,
+        altPool: ['Note key questions', 'Find the deadline', 'Identify the ask', 'Pull quotes you need'] },
+      { tag: 'EXEC', title: 'Type three short bullets', hint: 'No editing while writing.', reward: 4,
+        altPool: ['Answer in one sentence', 'Confirm + ask back', 'Reply with attachment', 'Schedule a call instead'] },
+      { tag: 'PUSH', title: "Send. Don't reread.", hint: 'Trust the draft.', reward: 3,
+        altPool: ['Send and snooze', 'Send and archive', 'Send + cc the team', 'Send + add to follow-ups'] },
+    ];
+  }
+  if (lower.includes('workout') || lower.includes('gym') || lower.includes('run')) {
+    return [
+      { tag: 'GEAR', title: 'Put on workout clothes', hint: 'Shoes too.', reward: 4,
+        altPool: ['Change shirt only', 'Lace up shoes first', 'Grab water bottle', 'Pick a playlist'] },
+      { tag: 'HYDR', title: 'Drink a glass of water', hint: 'Full glass.', reward: 4,
+        altPool: ['Eat a small snack', 'Take pre-workout', 'Stretch hamstrings', 'Foam roll legs'] },
+      { tag: 'WARM', title: '60 seconds of stretching', hint: 'Light. Just to start moving.', reward: 4,
+        altPool: ['Walk in place 1 min', '20 jumping jacks', 'Light cardio 90s', 'Mobility flow'] },
+      { tag: 'EXEC', title: 'Begin first set', hint: "You're already there.", reward: 3,
+        altPool: ['Start with cardio', 'Light warm-up set', 'Pick first exercise', 'Open workout log'] },
+    ];
+  }
+  return [
+    { tag: 'OPEN', title: `Open everything for "${mission.slice(0, 28)}${mission.length > 28 ? '…' : ''}"`, hint: 'No setup yet — just open it.', reward: 4,
+      altPool: ['Pull up the relevant tab', 'Find your last note', 'Open the calendar', "Resume yesterday's draft"] },
+    { tag: 'SCAN', title: 'Re-read the last thing you did', hint: 'Get oriented in 30 seconds.', reward: 4,
+      altPool: ["List what's done", 'Note one blocker', 'Skim the brief', "Check today's plan"] },
+    { tag: 'EXEC', title: 'Write the first line', hint: 'Imperfect is fine.', reward: 4,
+      altPool: ['Sketch the structure', 'Make the smallest move', 'Write a bad first draft', 'Try one approach'] },
+    { tag: 'PUSH', title: 'Continue for 60 more seconds', hint: 'Momentum > perfection.', reward: 3,
+      altPool: ['Keep pushing — 60s more', 'Finish current sentence', 'Wrap and save', 'Note next step'] },
+  ];
+}
+
+// ─────────────────────────────────────────────────────────────
+// App root
+// ─────────────────────────────────────────────────────────────
+function LaunchApp() {
+  const [screen, setScreen] = useState('input');
+  const [mission, setMission] = useState('');
+  const [stepIdx, setStepIdx] = useState(0);
+  const [momentumGained, setMomentumGained] = useState(0);
+  const [momentum, setMomentum] = useState(232);
+  const [launchesToday, setLaunchesToday] = useState(2);
+  const [stepOverrides, setStepOverrides] = useState({});
+
+  useEffect(() => { setStepOverrides({}); }, [mission]);
+
+  const steps = useMemo(() => generateSteps(mission), [mission]);
+
+  const resolvedStep = useMemo(() => {
+    const base = steps[stepIdx];
+    if (!base) return base;
+    const ov = stepOverrides[stepIdx];
+    return ov ? { ...base, ...ov } : base;
+  }, [steps, stepIdx, stepOverrides]);
+
+  const handleEditStep = (newTitle) => {
+    setStepOverrides(prev => ({ ...prev, [stepIdx]: { title: newTitle } }));
+  };
+
+  const advanceStep = () => {
+    const reward = steps[stepIdx]?.reward || 4;
+    setMomentumGained(g => g + reward);
+    if (stepIdx + 1 >= steps.length) {
+      setMomentum(m => m + 15);
+      setLaunchesToday(n => n + 1);
+      setStepIdx(0);
+      setScreen('reward');
+    } else {
+      setStepIdx(i => i + 1);
+    }
+  };
+
+  const startExecution = () => {
+    setStepIdx(0);
+    setMomentumGained(0);
+    setScreen('step');
+  };
+
+  let body = null;
+  if (screen === 'input')
+    body = <MissionInput onLaunch={() => setScreen('countdown')} mission={mission} setMission={setMission} />;
+  else if (screen === 'countdown')
+    body = <Countdown onComplete={startExecution} />;
+  else if (screen === 'step')
+    body = (
+      <ExecutionStep
+        step={resolvedStep}
+        stepIdx={stepIdx}
+        totalSteps={steps.length}
+        momentumGained={momentumGained}
+        onComplete={advanceStep}
+        onEditStep={handleEditStep}
+        mission={mission}
+      />
+    );
+  else if (screen === 'reward')
+    body = <Reward onNext={() => { setMission(''); setMomentumGained(0); setScreen('input'); }} onLog={() => setScreen('dashboard')} momentum={momentum - 15} />;
+  else if (screen === 'dashboard')
+    body = <Dashboard momentum={momentum} launchesToday={launchesToday} onNewMission={() => { setMission(''); setMomentumGained(0); setScreen('input'); }} />;
+
+  return (
+    <div style={{
+      width: '100%', height: '100%', position: 'relative',
+      background: T.bg,
+      color: T.text, fontFamily: T.display,
+      display: 'flex', flexDirection: 'column',
+      overflow: 'hidden',
+    }}>
+      <div style={{
+        position: 'absolute', inset: 0, pointerEvents: 'none',
+        background: `
+          radial-gradient(ellipse 600px 400px at 50% 0%, rgba(0,229,255,0.10), transparent 70%),
+          radial-gradient(ellipse 500px 600px at 100% 100%, rgba(168,118,255,0.08), transparent 70%),
+          radial-gradient(ellipse 400px 300px at 0% 80%, rgba(61,127,255,0.07), transparent 70%)
+        `,
+      }} />
+      <div style={{
+        position: 'absolute', inset: 0, pointerEvents: 'none', opacity: 0.5,
+        backgroundImage: `linear-gradient(rgba(140,200,255,0.04) 1px, transparent 1px),
+                          linear-gradient(90deg, rgba(140,200,255,0.04) 1px, transparent 1px)`,
+        backgroundSize: '32px 32px',
+        maskImage: 'radial-gradient(ellipse at 50% 30%, black 30%, transparent 80%)',
+        WebkitMaskImage: 'radial-gradient(ellipse at 50% 30%, black 30%, transparent 80%)',
+      }} />
+
+      {/* Top safe-area / status bar pad */}
+      <div style={{ height: 'max(12px, env(safe-area-inset-top))', flexShrink: 0 }} />
+
+      {/* Screen body */}
+      <div style={{ flex: 1, position: 'relative', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+        {body}
+      </div>
+
+      {/* Bottom nav (visible on dashboard) */}
+      {screen === 'dashboard' && <BottomNav screen={screen} onNav={setScreen} />}
+
+      {/* Bottom safe-area pad */}
+      <div style={{ height: 'max(12px, env(safe-area-inset-bottom))', flexShrink: 0 }} />
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<LaunchApp />);
+</script>
+
+</body>
+</html>
