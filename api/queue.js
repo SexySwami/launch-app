@@ -82,6 +82,25 @@ export default async function handler(request) {
       return json({ items: updated, added: newItem }, 200);
     }
 
+    if (request.method === 'PUT') {
+      const body = await request.json().catch(() => ({}));
+      const incoming = Array.isArray(body?.items) ? body.items : null;
+      if (!incoming) return json({ error: 'Missing items array' }, 400);
+
+      // Preserve only the fields we own; trust ids and text from client
+      // since no auth/multi-user means clients are the source of truth here.
+      const cleaned = incoming
+        .filter(i => i && typeof i.id === 'string' && typeof i.text === 'string')
+        .map(i => ({
+          id: i.id,
+          text: i.text.toString().slice(0, 500),
+          createdAt: Number.isFinite(i.createdAt) ? i.createdAt : Date.now(),
+        }));
+
+      await writeQueue(cleaned);
+      return json({ items: cleaned }, 200);
+    }
+
     if (request.method === 'DELETE') {
       const u = new URL(request.url);
       const id = u.searchParams.get('id');

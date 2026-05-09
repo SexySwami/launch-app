@@ -195,6 +195,22 @@ function GlowButton({ children, onClick, variant = 'primary', disabled, style })
 }
 
 // ─────────────────────────────────────────────────────────────
+// Drop indicator shown between checklist items during drag-to-reorder
+// ─────────────────────────────────────────────────────────────
+function DropIndicator() {
+  return (
+    <div style={{
+      height: 3, marginLeft: 4, marginRight: 4,
+      borderRadius: 99,
+      background: `linear-gradient(90deg, transparent, ${T.cyan}, transparent)`,
+      boxShadow: `0 0 14px ${T.cyan}, 0 0 6px ${T.cyan}`,
+      flexShrink: 0,
+      animation: 'pulse 1.2s ease-in-out infinite',
+    }} />
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 // Screen 1 — Mission Input
 // ─────────────────────────────────────────────────────────────
 function MissionInput({ onLaunch, mission, setMission }) {
@@ -216,6 +232,11 @@ function MissionInput({ onLaunch, mission, setMission }) {
   const [addingItem, setAddingItem] = useState(false);
   const [newItemDraft, setNewItemDraft] = useState('');
   const newItemInputRef = useRef(null);
+
+  // Drag-to-reorder state
+  const [drag, setDrag] = useState(null);
+  // drag = null | { id, fromIdx, startY, deltaY, dropIdx }
+  const itemRefs = useRef({});
 
   const canCallAPI = typeof window !== 'undefined'
     && /^https?:$/.test(window.location?.protocol || '');
@@ -315,8 +336,77 @@ function MissionInput({ onLaunch, mission, setMission }) {
   };
 
   const handleLaunchItem = (text) => {
+    if (drag) return; // ignore taps mid-drag
     setMission(text);
     onLaunch(text);
+  };
+
+  const handleLazyLaunch = () => {
+    if (items.length === 0 || drag) return;
+    handleLaunchItem(items[0].text);
+  };
+
+  const reorderItems = async (newOrder) => {
+    const prev = items;
+    setItems(newOrder);          // optimistic
+    setItemsError(null);
+    if (!canCallAPI) return;
+    try {
+      const res = await fetch('/api/queue', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ items: newOrder }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Failed (${res.status})`);
+      if (Array.isArray(data.items)) setItems(data.items);
+    } catch (err) {
+      setItems(prev);              // rollback
+      setItemsError(err.message || 'Could not save order');
+    }
+  };
+
+  const handleDragStart = (e, item, idx) => {
+    if (e.button !== undefined && e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setDrag({
+      id: item.id,
+      fromIdx: idx,
+      startY: e.clientY,
+      deltaY: 0,
+      dropIdx: idx,
+    });
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
+  };
+
+  const handleDragMove = (e) => {
+    if (!drag) return;
+    e.preventDefault();
+    const deltaY = e.clientY - drag.startY;
+    const others = items.filter(i => i.id !== drag.id);
+    let dropIdx = others.length;
+    for (let i = 0; i < others.length; i++) {
+      const node = itemRefs.current[others[i].id];
+      if (!node) continue;
+      const rect = node.getBoundingClientRect();
+      const midY = rect.top + rect.height / 2;
+      if (e.clientY < midY) { dropIdx = i; break; }
+    }
+    if (dropIdx !== drag.dropIdx || deltaY !== drag.deltaY) {
+      setDrag(d => d ? { ...d, deltaY, dropIdx } : d);
+    }
+  };
+
+  const handleDragEnd = () => {
+    if (!drag) return;
+    const { fromIdx, dropIdx } = drag;
+    setDrag(null);
+    if (fromIdx === dropIdx) return;
+    const reordered = [...items];
+    const [moved] = reordered.splice(fromIdx, 1);
+    reordered.splice(dropIdx, 0, moved);
+    reorderItems(reordered);
   };
 
   return (
@@ -392,6 +482,40 @@ function MissionInput({ onLaunch, mission, setMission }) {
           }}>
             Mission Queue
           </div>
+
+          {items.length > 0 && (
+            <button
+              onClick={handleLazyLaunch}
+              disabled={!!drag}
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+                width: '100%',
+                padding: '14px 16px',
+                background: `linear-gradient(180deg, rgba(0,229,255,0.20), rgba(79,227,193,0.12))`,
+                border: `1px solid rgba(0,229,255,0.5)`,
+                borderRadius: 14,
+                fontFamily: T.display, fontSize: 14, fontWeight: 600,
+                color: T.text,
+                letterSpacing: '0.04em', textTransform: 'uppercase',
+                cursor: drag ? 'default' : 'pointer',
+                transition: 'all 200ms ease',
+                WebkitTapHighlightColor: 'transparent',
+                WebkitAppearance: 'none', appearance: 'none',
+                marginBottom: 8, flexShrink: 0,
+                boxShadow: `0 0 0 1px rgba(0,229,255,0.15) inset, 0 4px 24px rgba(0,229,255,0.18)`,
+              }}
+              onTouchStart={e => e.currentTarget.style.transform = 'scale(0.985)'}
+              onTouchEnd={e => e.currentTarget.style.transform = 'scale(1)'}
+              onMouseDown={e => e.currentTarget.style.transform = 'scale(0.985)'}
+              onMouseUp={e => e.currentTarget.style.transform = 'scale(1)'}
+              onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" style={{ color: T.cyan, filter: `drop-shadow(0 0 6px ${T.cyan})` }}>
+                <path d="M7 1l-3 7h3l-2 5L11 6H8l2-5z" fill="currentColor"/>
+              </svg>
+              I'm Lazy, Help Me
+            </button>
+          )}
 
           {addingItem ? (
             <div style={{
@@ -519,53 +643,117 @@ function MissionInput({ onLaunch, mission, setMission }) {
                 Syncing queue from cloud…
               </div>
             )}
-            {items.map(item => (
-              <div
-                key={item.id}
-                onClick={() => handleLaunchItem(item.text)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleLaunchItem(item.text); } }}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 12,
-                  background: 'rgba(255,255,255,0.025)',
-                  border: `1px solid ${T.hairlineSoft}`,
-                  borderRadius: 14, padding: '4px 4px 4px 14px',
-                  fontFamily: T.display, fontSize: 14, color: T.text,
-                  cursor: 'pointer', textAlign: 'left',
-                  transition: 'all 150ms',
-                  WebkitTapHighlightColor: 'transparent',
-                  flexShrink: 0, minHeight: 48,
-                }}
-              >
-                <span style={{
-                  width: 6, height: 6, borderRadius: 1,
-                  background: T.cyan, opacity: 0.6, flexShrink: 0,
-                }} />
-                <span style={{
-                  flex: 1, minWidth: 0,
-                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                }}>{item.text}</span>
-                <svg width="12" height="12" viewBox="0 0 12 12" style={{ flexShrink: 0, color: T.text3 }}>
-                  <path d="M2 6h7m0 0L6 3m3 3L6 9" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
-                <button
-                  onClick={(e) => { e.stopPropagation(); handleDeleteItem(item.id); }}
-                  aria-label={`Delete ${item.text}`}
-                  style={{
-                    all: 'unset', cursor: 'pointer', flexShrink: 0,
-                    width: 32, height: 32, borderRadius: 99,
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    color: T.text3,
-                    transition: 'color 150ms',
-                  }}
-                >
-                  <svg width="10" height="10" viewBox="0 0 10 10">
-                    <path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-                  </svg>
-                </button>
-              </div>
-            ))}
+            {items.map((item, idx) => {
+              const isDragging = drag?.id === item.id;
+              const others = drag ? items.filter(i => i.id !== drag.id) : [];
+              const othersIdx = drag && !isDragging
+                ? others.findIndex(i => i.id === item.id)
+                : -1;
+              const showIndicatorBefore = drag && !isDragging && drag.dropIdx === othersIdx;
+              const isFirstItem = idx === 0;
+
+              return (
+                <React.Fragment key={item.id}>
+                  {showIndicatorBefore && <DropIndicator />}
+                  <div
+                    ref={el => { if (el) itemRefs.current[item.id] = el; else delete itemRefs.current[item.id]; }}
+                    data-item-id={item.id}
+                    onClick={() => handleLaunchItem(item.text)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleLaunchItem(item.text); } }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      background: isFirstItem
+                        ? 'linear-gradient(180deg, rgba(0,229,255,0.07), rgba(255,255,255,0.025))'
+                        : 'rgba(255,255,255,0.025)',
+                      border: `1px solid ${isFirstItem ? 'rgba(0,229,255,0.32)' : T.hairlineSoft}`,
+                      borderRadius: 14, padding: '4px 4px 4px 4px',
+                      fontFamily: T.display, fontSize: 14, color: T.text,
+                      cursor: isDragging ? 'grabbing' : 'pointer', textAlign: 'left',
+                      WebkitTapHighlightColor: 'transparent',
+                      flexShrink: 0, minHeight: 48,
+                      position: 'relative',
+                      transform: isDragging
+                        ? `translateY(${drag.deltaY}px) scale(1.02)`
+                        : 'none',
+                      zIndex: isDragging ? 10 : 1,
+                      boxShadow: isDragging
+                        ? `0 12px 32px rgba(0,229,255,0.32), 0 0 24px rgba(0,229,255,0.20)`
+                        : isFirstItem ? `0 0 12px rgba(0,229,255,0.10)` : 'none',
+                      opacity: isDragging ? 0.96 : 1,
+                      transition: isDragging
+                        ? 'box-shadow 200ms ease, opacity 200ms ease'
+                        : 'transform 220ms cubic-bezier(0.2,0.8,0.2,1), box-shadow 200ms ease, border-color 200ms ease, background 200ms ease',
+                      willChange: isDragging ? 'transform' : 'auto',
+                    }}
+                  >
+                    {/* Drag handle */}
+                    <div
+                      onPointerDown={(e) => handleDragStart(e, item, idx)}
+                      onPointerMove={handleDragMove}
+                      onPointerUp={handleDragEnd}
+                      onPointerCancel={handleDragEnd}
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => e.stopPropagation()}
+                      role="button"
+                      aria-label="Drag to reorder"
+                      tabIndex={-1}
+                      style={{
+                        width: 32, height: 44, flexShrink: 0,
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        color: isDragging ? T.cyan : T.text3,
+                        cursor: isDragging ? 'grabbing' : 'grab',
+                        touchAction: 'none',
+                        transition: 'color 150ms',
+                      }}
+                    >
+                      <svg width="12" height="14" viewBox="0 0 12 14">
+                        <circle cx="3.5" cy="3" r="1.1" fill="currentColor"/>
+                        <circle cx="8.5" cy="3" r="1.1" fill="currentColor"/>
+                        <circle cx="3.5" cy="7" r="1.1" fill="currentColor"/>
+                        <circle cx="8.5" cy="7" r="1.1" fill="currentColor"/>
+                        <circle cx="3.5" cy="11" r="1.1" fill="currentColor"/>
+                        <circle cx="8.5" cy="11" r="1.1" fill="currentColor"/>
+                      </svg>
+                    </div>
+                    {/* Priority dot — first item gets brighter to signal "highest priority" */}
+                    <span style={{
+                      width: 6, height: 6, borderRadius: 1,
+                      background: T.cyan,
+                      opacity: isFirstItem ? 1 : 0.55,
+                      boxShadow: isFirstItem ? `0 0 8px ${T.cyan}` : 'none',
+                      flexShrink: 0,
+                    }} />
+                    <span style={{
+                      flex: 1, minWidth: 0,
+                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                      fontWeight: isFirstItem ? 600 : 500,
+                    }}>{item.text}</span>
+                    <svg width="12" height="12" viewBox="0 0 12 12" style={{ flexShrink: 0, color: isFirstItem ? T.cyan : T.text3 }}>
+                      <path d="M2 6h7m0 0L6 3m3 3L6 9" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleDeleteItem(item.id); }}
+                      aria-label={`Delete ${item.text}`}
+                      style={{
+                        all: 'unset', cursor: 'pointer', flexShrink: 0,
+                        width: 32, height: 32, borderRadius: 99,
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        color: T.text3,
+                        transition: 'color 150ms',
+                      }}
+                    >
+                      <svg width="10" height="10" viewBox="0 0 10 10">
+                        <path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                      </svg>
+                    </button>
+                  </div>
+                </React.Fragment>
+              );
+            })}
+            {/* Drop indicator at end of list when pointer is past the last item */}
+            {drag && drag.dropIdx === items.filter(i => i.id !== drag.id).length && <DropIndicator />}
           </div>
         </div>
       </div>
