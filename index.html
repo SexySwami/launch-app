@@ -208,22 +208,47 @@ function MissionInput({ onLaunch, mission, setMission }) {
   const [phIdx, setPhIdx] = useState(0);
   const [inputFocused, setInputFocused] = useState(false);
 
-  // Persistent mission queue (localStorage).
-  const [items, setItems] = useState(() => {
-    try {
-      const stored = localStorage.getItem('launch:queue');
-      if (!stored) return [];
-      const parsed = JSON.parse(stored);
-      return Array.isArray(parsed) ? parsed.filter(i => i && typeof i.text === 'string') : [];
-    } catch { return []; }
-  });
+  // Cloud-backed mission queue (Upstash Redis via /api/queue).
+  const [items, setItems] = useState([]);
+  const [itemsLoading, setItemsLoading] = useState(true);
+  const [itemsError, setItemsError] = useState(null);
+  const [savingItem, setSavingItem] = useState(false);
   const [addingItem, setAddingItem] = useState(false);
   const [newItemDraft, setNewItemDraft] = useState('');
   const newItemInputRef = useRef(null);
 
+  const canCallAPI = typeof window !== 'undefined'
+    && /^https?:$/.test(window.location?.protocol || '');
+
+  const fetchItems = async () => {
+    if (!canCallAPI) {
+      setItemsLoading(false);
+      return;
+    }
+    setItemsError(null);
+    try {
+      const res = await fetch('/api/queue', { cache: 'no-store' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Failed (${res.status})`);
+      setItems(Array.isArray(data.items) ? data.items : []);
+    } catch (err) {
+      setItemsError(err.message || 'Could not load queue');
+    } finally {
+      setItemsLoading(false);
+    }
+  };
+
+  // Load on mount.
+  useEffect(() => { fetchItems(); }, []);
+
+  // Refetch when the tab becomes visible again — keeps devices roughly in sync
+  // without needing real-time websockets.
   useEffect(() => {
-    try { localStorage.setItem('launch:queue', JSON.stringify(items)); } catch {}
-  }, [items]);
+    if (typeof document === 'undefined') return;
+    const handler = () => { if (document.visibilityState === 'visible') fetchItems(); };
+    document.addEventListener('visibilitychange', handler);
+    return () => document.removeEventListener('visibilitychange', handler);
+  }, []);
 
   useEffect(() => {
     if (addingItem) {
@@ -238,25 +263,55 @@ function MissionInput({ onLaunch, mission, setMission }) {
     return () => clearInterval(id);
   }, [mission]);
 
-  const newId = () => {
-    if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
-    return `m_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-  };
-
-  const handleAddItem = () => {
+  const handleAddItem = async () => {
     const t = newItemDraft.trim();
     if (!t) {
       setAddingItem(false);
       setNewItemDraft('');
       return;
     }
-    setItems(prev => [{ id: newId(), text: t }, ...prev]);
-    setNewItemDraft('');
-    // Stay open for fast repeated entry; empty Enter will dismiss.
+    if (savingItem || !canCallAPI) {
+      if (!canCallAPI) setItemsError('Adding requires the deployed app (cloud sync)');
+      return;
+    }
+
+    setSavingItem(true);
+    setItemsError(null);
+    try {
+      const res = await fetch('/api/queue', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: t }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Failed (${res.status})`);
+      setItems(Array.isArray(data.items) ? data.items : []);
+      setNewItemDraft('');
+      // Stay open for fast repeated entry; empty Enter will dismiss.
+    } catch (err) {
+      setItemsError(err.message || 'Could not save item');
+    } finally {
+      setSavingItem(false);
+    }
   };
 
-  const handleDeleteItem = (id) => {
+  const handleDeleteItem = async (id) => {
+    if (!canCallAPI) {
+      setItemsError('Deleting requires the deployed app (cloud sync)');
+      return;
+    }
+    // Optimistic update — snap it out of the list immediately.
+    const before = items;
     setItems(prev => prev.filter(item => item.id !== id));
+    try {
+      const res = await fetch(`/api/queue?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Failed (${res.status})`);
+      if (Array.isArray(data.items)) setItems(data.items);
+    } catch (err) {
+      setItems(before); // rollback
+      setItemsError(err.message || 'Could not delete item');
+    }
   };
 
   const handleLaunchItem = (text) => {
@@ -368,11 +423,11 @@ function MissionInput({ onLaunch, mission, setMission }) {
               />
               <button
                 onClick={handleAddItem}
-                disabled={!newItemDraft.trim()}
-                aria-label="Save"
+                disabled={!newItemDraft.trim() || savingItem}
+                aria-label={savingItem ? 'Saving' : 'Save'}
                 style={{
                   all: 'unset', flexShrink: 0,
-                  cursor: newItemDraft.trim() ? 'pointer' : 'default',
+                  cursor: (newItemDraft.trim() && !savingItem) ? 'pointer' : 'default',
                   width: 30, height: 30, borderRadius: 99,
                   background: newItemDraft.trim()
                     ? `linear-gradient(180deg, ${T.cyan}, ${T.blue})`
@@ -381,11 +436,18 @@ function MissionInput({ onLaunch, mission, setMission }) {
                   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                   boxShadow: newItemDraft.trim() ? `0 0 12px ${T.cyan}88` : 'none',
                   transition: 'all 200ms ease',
+                  opacity: savingItem ? 0.7 : 1,
                 }}
               >
-                <svg width="13" height="13" viewBox="0 0 13 13">
-                  <path d="M2 6.5l3 3 6-7" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
+                {savingItem ? (
+                  <svg width="12" height="12" viewBox="0 0 12 12" style={{ animation: 'spin360 800ms linear infinite' }}>
+                    <path d="M10 6a4 4 0 1 1-1.2-2.85M10 1.5V4H7.5" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                ) : (
+                  <svg width="13" height="13" viewBox="0 0 13 13">
+                    <path d="M2 6.5l3 3 6-7" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                )}
               </button>
               <button
                 onClick={() => { setAddingItem(false); setNewItemDraft(''); }}
@@ -427,10 +489,36 @@ function MissionInput({ onLaunch, mission, setMission }) {
             </button>
           )}
 
+          {itemsError && (
+            <div style={{
+              fontFamily: T.mono, fontSize: 9.5, letterSpacing: '0.18em',
+              color: T.warn, textTransform: 'uppercase',
+              textAlign: 'center', lineHeight: 1.4,
+              marginBottom: 8, flexShrink: 0,
+            }}>
+              {itemsError}
+            </div>
+          )}
+
           <div style={{
             display: 'flex', flexDirection: 'column', gap: 8,
             flex: 1, minHeight: 0, overflowY: 'auto', paddingBottom: 4,
           }}>
+            {itemsLoading && items.length === 0 && (
+              <div style={{
+                fontFamily: T.mono, fontSize: 10, letterSpacing: '0.22em',
+                color: T.text3, textTransform: 'uppercase',
+                textAlign: 'center', padding: '24px 0',
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              }}>
+                <span style={{
+                  width: 6, height: 6, borderRadius: 99, background: T.cyan,
+                  boxShadow: `0 0 8px ${T.cyan}`,
+                  animation: 'pulse 1.2s ease-in-out infinite',
+                }} />
+                Syncing queue from cloud…
+              </div>
+            )}
             {items.map(item => (
               <div
                 key={item.id}
