@@ -71,15 +71,33 @@ export default async function handler(request) {
 
     if (request.method === 'POST') {
       const body = await request.json().catch(() => ({}));
-      const text = (body?.text || '').toString().trim();
-      if (!text) return json({ error: 'Missing text' }, 400);
-      if (text.length > 500) return json({ error: 'Text too long (500 char max)' }, 400);
+
+      // Accept either { text: "..." } (single) or { texts: ["...", "..."] } (batch)
+      let texts = [];
+      if (Array.isArray(body?.texts)) {
+        texts = body.texts
+          .filter(t => typeof t === 'string')
+          .map(t => t.trim())
+          .filter(t => t);
+      } else if (body?.text) {
+        const t = body.text.toString().trim();
+        if (t) texts = [t];
+      }
+
+      if (texts.length === 0) return json({ error: 'Missing text or texts' }, 400);
+      if (texts.some(t => t.length > 500)) {
+        return json({ error: 'A task is too long (500 char max each)' }, 400);
+      }
 
       const items = await readQueue();
-      const newItem = { id: newId(), text, createdAt: Date.now() };
-      const updated = [newItem, ...items];
+      const added = texts.map(t => ({
+        id: newId(),
+        text: t,
+        createdAt: Date.now(),
+      }));
+      const updated = [...added, ...items];
       await writeQueue(updated);
-      return json({ items: updated, added: newItem }, 200);
+      return json({ items: updated, added }, 200);
     }
 
     if (request.method === 'PUT') {

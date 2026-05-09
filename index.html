@@ -284,9 +284,22 @@ function MissionInput({ onLaunch, mission, setMission }) {
     return () => clearInterval(id);
   }, [mission]);
 
+  const autoResizeTextarea = (el) => {
+    if (!el) return;
+    el.style.height = 'auto';
+    const next = Math.min(el.scrollHeight, 240);
+    el.style.height = next + 'px';
+    el.style.overflowY = el.scrollHeight > 240 ? 'auto' : 'hidden';
+  };
+
+  // Auto-resize on draft changes (covers paste, programmatic clears, etc).
+  useEffect(() => {
+    if (newItemInputRef.current) autoResizeTextarea(newItemInputRef.current);
+  }, [newItemDraft, addingItem]);
+
   const handleAddItem = async () => {
-    const t = newItemDraft.trim();
-    if (!t) {
+    const text = newItemDraft.trim();
+    if (!text) {
       setAddingItem(false);
       setNewItemDraft('');
       return;
@@ -299,10 +312,26 @@ function MissionInput({ onLaunch, mission, setMission }) {
     setSavingItem(true);
     setItemsError(null);
     try {
+      let texts = [text];
+
+      // Multi-line block → ask Claude to split + rewrite.
+      if (text.includes('\n')) {
+        const parseRes = await fetch('/api/parse-tasks', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ text }),
+        });
+        const parseData = await parseRes.json().catch(() => ({}));
+        if (!parseRes.ok) throw new Error(parseData.error || `Parse failed (${parseRes.status})`);
+        const tasks = Array.isArray(parseData.tasks) ? parseData.tasks : [];
+        if (tasks.length === 0) throw new Error('No tasks parsed from that text');
+        texts = tasks;
+      }
+
       const res = await fetch('/api/queue', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ text: t }),
+        body: JSON.stringify(texts.length === 1 ? { text: texts[0] } : { texts }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `Failed (${res.status})`);
@@ -519,30 +548,42 @@ function MissionInput({ onLaunch, mission, setMission }) {
 
           {addingItem ? (
             <div style={{
-              display: 'flex', alignItems: 'center', gap: 6,
+              display: 'flex', alignItems: 'flex-end', gap: 6,
               background: 'rgba(255,255,255,0.04)',
               border: `1px solid rgba(0,229,255,0.42)`,
               borderRadius: 14, padding: '8px 8px 8px 14px',
               boxShadow: '0 0 0 3px rgba(0,229,255,0.08), 0 0 24px rgba(0,229,255,0.10)',
               marginBottom: 8, flexShrink: 0,
-              transition: 'all 200ms ease',
+              transition: 'border-color 200ms ease, box-shadow 200ms ease',
             }}>
-              <input
+              <textarea
                 ref={newItemInputRef}
-                type="text"
                 value={newItemDraft}
-                onChange={e => setNewItemDraft(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter') { e.preventDefault(); handleAddItem(); }
-                  else if (e.key === 'Escape') { setAddingItem(false); setNewItemDraft(''); }
+                onChange={e => {
+                  setNewItemDraft(e.target.value);
+                  autoResizeTextarea(e.target);
                 }}
-                placeholder="Type a mission and hit return"
-                enterKeyHint="done"
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleAddItem();
+                  } else if (e.key === 'Escape') {
+                    setAddingItem(false);
+                    setNewItemDraft('');
+                  }
+                }}
+                placeholder="Type or paste one or more tasks. Shift+Enter for newline."
+                rows={1}
                 style={{
                   all: 'unset',
-                  flex: 1, minWidth: 0,
+                  display: 'block', boxSizing: 'border-box',
+                  flex: 1, minWidth: 0, width: '100%',
                   fontFamily: T.display, fontSize: 14, color: T.text,
-                  padding: '4px 0',
+                  lineHeight: 1.45, padding: '6px 0',
+                  minHeight: 22, maxHeight: 240,
+                  resize: 'none',
+                  whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                  overflowY: 'hidden',
                 }}
               />
               <button
