@@ -817,7 +817,14 @@ function EditStepModal({ open, step, stepIdx, totalSteps, mission, onClose, onPi
     if (refreshing) return;
     setRefreshing(true);
     setGenError('');
+
+    // Sandboxed previews (about:srcdoc, file://, blob:) can't resolve
+    // relative fetch URLs. Skip the API call there and use local pool quietly.
+    const canCallAPI = typeof window !== 'undefined'
+      && /^https?:$/.test(window.location?.protocol || '');
+
     try {
+      if (!canCallAPI) throw new Error('__skip_api__');
       const res = await fetch('/api/generate-options', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -848,7 +855,9 @@ function EditStepModal({ open, step, stepIdx, totalSteps, mission, onClose, onPi
         setCurrentAlts(fallback);
         setSeenOptions(prev => [...prev, ...fallback]);
       }
-      setGenError(err.message || 'Could not generate new options');
+      if (err.message !== '__skip_api__') {
+        setGenError(err.message || 'Could not generate new options');
+      }
     } finally {
       setRefreshing(false);
     }
