@@ -644,6 +644,7 @@ function ExecutionStep({ step, stepIdx, totalSteps, momentumGained, onComplete, 
         step={step}
         stepIdx={stepIdx}
         totalSteps={totalSteps}
+        mission={mission}
         onClose={() => setEditOpen(false)}
         onPick={(newTitle) => {
           onEditStep(newTitle);
@@ -657,8 +658,10 @@ function ExecutionStep({ step, stepIdx, totalSteps, momentumGained, onComplete, 
 // ─────────────────────────────────────────────────────────────
 // Quick Edit Modal
 // ─────────────────────────────────────────────────────────────
-function EditStepModal({ open, step, stepIdx, totalSteps, onClose, onPick }) {
-  const [altIdx, setAltIdx] = useState(0);
+function EditStepModal({ open, step, stepIdx, totalSteps, mission, onClose, onPick }) {
+  const [currentAlts, setCurrentAlts] = useState([]);
+  const [seenOptions, setSeenOptions] = useState([]);
+  const [genError, setGenError] = useState('');
   const [customDraft, setCustomDraft] = useState('');
   const [listening, setListening] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
@@ -673,9 +676,23 @@ function EditStepModal({ open, step, stepIdx, totalSteps, onClose, onPick }) {
     []
   );
 
+  // Seed currentAlts from the step's local altPool whenever the step changes,
+  // so the modal opens instantly with sensible options. Regenerate calls Claude.
+  useEffect(() => {
+    if (!step) return;
+    const pool = step.altPool || [];
+    const initial = [];
+    for (const v of pool) {
+      if (initial.length >= 3) break;
+      if (v && v !== step.title && !initial.includes(v)) initial.push(v);
+    }
+    setCurrentAlts(initial);
+    setSeenOptions(initial.slice());
+    setGenError('');
+  }, [step]);
+
   useEffect(() => {
     if (open) {
-      setAltIdx(0);
       setCustomDraft('');
       setListening(false);
       setTranscribing(false);
@@ -796,26 +813,45 @@ function EditStepModal({ open, step, stepIdx, totalSteps, onClose, onPick }) {
 
   if (!open || !step) return null;
 
-  const pool = step.altPool || [];
-  const start = pool.length ? (altIdx * 3) % pool.length : 0;
-  const currentAlts = [];
-  for (let i = 0; i < Math.min(3, pool.length); i++) {
-    const v = pool[(start + i) % pool.length];
-    if (v && v !== step.title) currentAlts.push(v);
-  }
-  let j = 0;
-  while (currentAlts.length < Math.min(3, pool.length) && j < pool.length) {
-    const v = pool[(start + Math.min(3, pool.length) + j) % pool.length];
-    if (v && v !== step.title && !currentAlts.includes(v)) currentAlts.push(v);
-    j++;
-  }
-
-  const handleRegenerate = () => {
+  const handleRegenerate = async () => {
+    if (refreshing) return;
     setRefreshing(true);
-    setTimeout(() => {
-      setAltIdx(i => i + 1);
+    setGenError('');
+    try {
+      const res = await fetch('/api/generate-options', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          mission: mission || '',
+          stepTag: step.tag,
+          currentStep: step.title,
+          seenOptions: [...seenOptions, step.title],
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !Array.isArray(data.options) || data.options.length === 0) {
+        throw new Error(data.error || `Generator returned ${res.status}`);
+      }
+      const fresh = data.options.slice(0, 3);
+      setCurrentAlts(fresh);
+      setSeenOptions(prev => [...prev, ...fresh]);
+    } catch (err) {
+      // Fall back to the local altPool — pick 3 unseen entries.
+      const pool = step.altPool || [];
+      const seen = new Set([...seenOptions, step.title]);
+      const fallback = [];
+      for (const v of pool) {
+        if (fallback.length >= 3) break;
+        if (v && !seen.has(v)) fallback.push(v);
+      }
+      if (fallback.length > 0) {
+        setCurrentAlts(fallback);
+        setSeenOptions(prev => [...prev, ...fallback]);
+      }
+      setGenError(err.message || 'Could not generate new options');
+    } finally {
       setRefreshing(false);
-    }, 320);
+    }
   };
 
   const handleCustomSubmit = () => {
@@ -916,7 +952,7 @@ function EditStepModal({ open, step, stepIdx, totalSteps, onClose, onPick }) {
           }}>
             {currentAlts.map((a, i) => (
               <button
-                key={`${altIdx}-${i}-${a}`}
+                key={`${i}-${a}`}
                 onClick={() => onPick(a)}
                 style={{
                   all: 'unset', cursor: 'pointer',
@@ -959,12 +995,22 @@ function EditStepModal({ open, step, stepIdx, totalSteps, onClose, onPick }) {
           }}
         >
           <svg width="12" height="12" viewBox="0 0 12 12" style={{
-            animation: refreshing ? 'spin360 600ms ease' : 'none',
+            animation: refreshing ? 'spin360 800ms linear infinite' : 'none',
           }}>
             <path d="M10 6a4 4 0 1 1-1.2-2.85M10 1.5V4H7.5" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
-          {refreshing ? 'Regenerating…' : 'Generate new options'}
+          {refreshing ? 'Generating…' : 'Generate new options'}
         </button>
+
+        {genError && (
+          <div style={{
+            fontFamily: T.mono, fontSize: 9.5, letterSpacing: '0.18em',
+            color: T.warn, textTransform: 'uppercase', marginTop: -8, marginBottom: 14,
+            textAlign: 'center', lineHeight: 1.4,
+          }}>
+            {genError} — using local fallback
+          </div>
+        )}
 
         <div style={{
           fontFamily: T.mono, fontSize: 9.5, letterSpacing: '0.22em',
