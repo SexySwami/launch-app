@@ -661,11 +661,15 @@ function EditStepModal({ open, step, stepIdx, totalSteps, onClose, onPick }) {
   const [altIdx, setAltIdx] = useState(0);
   const [customDraft, setCustomDraft] = useState('');
   const [listening, setListening] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const [recError, setRecError] = useState('');
   const [refreshing, setRefreshing] = useState(false);
-  const recognitionRef = useRef(null);
+  const recRef = useRef(null);
 
-  const speechAvailable = useMemo(
-    () => typeof window !== 'undefined' && !!(window.SpeechRecognition || window.webkitSpeechRecognition),
+  const micAvailable = useMemo(
+    () => typeof window !== 'undefined'
+      && !!navigator?.mediaDevices?.getUserMedia
+      && typeof window.MediaRecorder !== 'undefined',
     []
   );
 
@@ -674,51 +678,121 @@ function EditStepModal({ open, step, stepIdx, totalSteps, onClose, onPick }) {
       setAltIdx(0);
       setCustomDraft('');
       setListening(false);
+      setTranscribing(false);
+      setRecError('');
       setRefreshing(false);
     }
   }, [open, stepIdx]);
 
-  // Web Speech API lifecycle — start when listening flips true, stop when false.
+  // Tear down any in-flight recording when the modal closes.
   useEffect(() => {
-    if (!listening) return;
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) { setListening(false); return; }
+    if (open) return;
+    const r = recRef.current;
+    if (r) {
+      r.cancelled = true;
+      try { r.recorder?.state === 'recording' && r.recorder.stop(); } catch {}
+      r.stream?.getTracks().forEach(t => { try { t.stop(); } catch {} });
+      recRef.current = null;
+    }
+  }, [open]);
 
-    const rec = new SR();
-    rec.continuous = false;
-    rec.interimResults = true;
-    rec.lang = navigator.language || 'en-US';
-
-    let finalText = '';
-    rec.onresult = (e) => {
-      let interim = '';
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const r = e.results[i];
-        if (r.isFinal) finalText += r[0].transcript;
-        else interim += r[0].transcript;
-      }
-      setCustomDraft((finalText + interim).trimStart());
-    };
-    rec.onend = () => setListening(false);
-    rec.onerror = (e) => {
-      if (e.error !== 'no-speech' && e.error !== 'aborted') {
-        console.warn('Speech recognition error:', e.error);
-      }
-      setListening(false);
-    };
-
-    recognitionRef.current = rec;
-    try { rec.start(); } catch (err) {
-      console.warn('Could not start recognition:', err);
-      setListening(false);
+  const startRecording = async () => {
+    setRecError('');
+    if (!micAvailable) {
+      setRecError('Mic capture not supported in this browser');
+      return;
+    }
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (err) {
+      setRecError(err.name === 'NotAllowedError'
+        ? 'Microphone permission denied'
+        : 'Could not access microphone: ' + (err.message || err.name));
+      return;
     }
 
-    return () => {
-      rec.onresult = rec.onend = rec.onerror = null;
-      try { rec.stop(); } catch {}
-      if (recognitionRef.current === rec) recognitionRef.current = null;
+    // Pick a Whisper-compatible mime type that the browser actually supports.
+    const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus', 'audio/ogg'];
+    let mimeType = '';
+    for (const mt of candidates) {
+      if (window.MediaRecorder.isTypeSupported && window.MediaRecorder.isTypeSupported(mt)) {
+        mimeType = mt;
+        break;
+      }
+    }
+
+    let recorder;
+    try {
+      recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+    } catch (err) {
+      stream.getTracks().forEach(t => t.stop());
+      setRecError('Recorder init failed: ' + err.message);
+      return;
+    }
+
+    const chunks = [];
+    const ref = { recorder, stream, chunks, mimeType: mimeType || recorder.mimeType, cancelled: false };
+    recRef.current = ref;
+
+    recorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) chunks.push(e.data); };
+
+    recorder.onstop = async () => {
+      stream.getTracks().forEach(t => { try { t.stop(); } catch {} });
+      if (ref.cancelled) return;
+      if (chunks.length === 0) {
+        setRecError('No audio captured. Try holding closer to the mic.');
+        return;
+      }
+
+      const blob = new Blob(chunks, { type: ref.mimeType || 'audio/webm' });
+      const ext = (ref.mimeType.includes('mp4') ? 'mp4'
+                  : ref.mimeType.includes('ogg') ? 'ogg'
+                  : 'webm');
+
+      setTranscribing(true);
+      try {
+        const fd = new FormData();
+        fd.append('audio', blob, `audio.${ext}`);
+        const res = await fetch('/api/transcribe', { method: 'POST', body: fd });
+        const data = await res.json().catch(() => ({}));
+        if (ref.cancelled) return;
+        if (!res.ok) {
+          setRecError(data.error || `Transcription failed (${res.status})`);
+        } else if (data.text) {
+          setCustomDraft(prev => (prev ? prev.trim() + ' ' : '') + data.text.trim());
+        } else {
+          setRecError('No transcription returned');
+        }
+      } catch (err) {
+        if (!ref.cancelled) setRecError('Network error: ' + err.message);
+      } finally {
+        if (!ref.cancelled) setTranscribing(false);
+        if (recRef.current === ref) recRef.current = null;
+      }
     };
-  }, [listening]);
+
+    recorder.onerror = (e) => {
+      setRecError('Recorder error: ' + (e.error?.message || 'unknown'));
+      setListening(false);
+    };
+
+    recorder.start();
+    setListening(true);
+  };
+
+  const stopRecording = () => {
+    const r = recRef.current;
+    if (r && r.recorder.state === 'recording') {
+      try { r.recorder.stop(); } catch {}
+    }
+    setListening(false);
+  };
+
+  const toggleMic = () => {
+    if (listening) stopRecording();
+    else startRecording();
+  };
 
   if (!open || !step) return null;
 
@@ -921,7 +995,7 @@ function EditStepModal({ open, step, stepIdx, totalSteps, onClose, onPick }) {
               padding: '4px 0',
             }}
           />
-          {!listening && customDraft.trim() ? (
+          {!listening && !transcribing && customDraft.trim() ? (
             <button onClick={handleCustomSubmit} aria-label="Submit" style={{
               all: 'unset', cursor: 'pointer', flexShrink: 0,
               width: 30, height: 30, borderRadius: 99,
@@ -934,40 +1008,54 @@ function EditStepModal({ open, step, stepIdx, totalSteps, onClose, onPick }) {
                 <path d="M2 6.5l3 3 6-7" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
             </button>
-          ) : speechAvailable ? (
+          ) : micAvailable ? (
             <button
-              onClick={() => setListening(l => !l)}
+              onClick={toggleMic}
+              disabled={transcribing}
               aria-label={listening ? 'Stop voice input' : 'Voice input'}
               style={{
-                all: 'unset', cursor: 'pointer', flexShrink: 0,
+                all: 'unset', cursor: transcribing ? 'default' : 'pointer', flexShrink: 0,
                 width: 30, height: 30, borderRadius: 99,
-                background: listening ? `linear-gradient(180deg, ${T.teal}, ${T.cyan})` : 'rgba(255,255,255,0.06)',
-                border: `1px solid ${listening ? 'transparent' : T.hairlineSoft}`,
-                color: listening ? '#001018' : T.text2,
+                background: listening
+                  ? `linear-gradient(180deg, ${T.teal}, ${T.cyan})`
+                  : transcribing ? 'rgba(168,118,255,0.18)' : 'rgba(255,255,255,0.06)',
+                border: `1px solid ${listening ? 'transparent' : transcribing ? 'rgba(168,118,255,0.4)' : T.hairlineSoft}`,
+                color: listening ? '#001018' : transcribing ? T.purple : T.text2,
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                 transition: 'all 220ms ease',
                 boxShadow: listening ? `0 0 12px ${T.teal}99` : 'none',
               }}
             >
-              <svg width="13" height="13" viewBox="0 0 14 14">
-                <path d="M7 1.8a1.9 1.9 0 0 0-1.9 1.9v3.2a1.9 1.9 0 1 0 3.8 0V3.7A1.9 1.9 0 0 0 7 1.8z" fill="currentColor"/>
-                <path d="M3.5 7a3.5 3.5 0 0 0 7 0M7 10.5V12.4M5 12.4h4" stroke="currentColor" strokeWidth="1.2" fill="none" strokeLinecap="round"/>
-              </svg>
+              {transcribing ? (
+                <svg width="12" height="12" viewBox="0 0 12 12" style={{ animation: 'spin360 800ms linear infinite' }}>
+                  <path d="M10 6a4 4 0 1 1-1.2-2.85M10 1.5V4H7.5" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              ) : (
+                <svg width="13" height="13" viewBox="0 0 14 14">
+                  <path d="M7 1.8a1.9 1.9 0 0 0-1.9 1.9v3.2a1.9 1.9 0 1 0 3.8 0V3.7A1.9 1.9 0 0 0 7 1.8z" fill="currentColor"/>
+                  <path d="M3.5 7a3.5 3.5 0 0 0 7 0M7 10.5V12.4M5 12.4h4" stroke="currentColor" strokeWidth="1.2" fill="none" strokeLinecap="round"/>
+                </svg>
+              )}
             </button>
           ) : null}
         </div>
-        {listening && (
+        {(listening || transcribing || recError) && (
           <div style={{
             fontFamily: T.mono, fontSize: 10, letterSpacing: '0.22em',
-            color: T.teal, textTransform: 'uppercase', marginTop: 8, textAlign: 'center',
+            color: recError ? T.warn : transcribing ? T.purple : T.teal,
+            textTransform: 'uppercase', marginTop: 8, textAlign: 'center',
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+            lineHeight: 1.3,
           }}>
-            <span style={{
-              width: 5, height: 5, borderRadius: 99, background: T.teal,
-              boxShadow: `0 0 8px ${T.teal}`,
-              animation: 'pulse 1.2s ease-in-out infinite',
-            }} />
-            Listening…
+            {!recError && (
+              <span style={{
+                width: 5, height: 5, borderRadius: 99,
+                background: transcribing ? T.purple : T.teal,
+                boxShadow: `0 0 8px ${transcribing ? T.purple : T.teal}`,
+                animation: 'pulse 1.2s ease-in-out infinite',
+              }} />
+            )}
+            {recError ? recError : transcribing ? 'Transcribing…' : 'Listening…'}
           </div>
         )}
       </div>
