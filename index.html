@@ -204,11 +204,61 @@ function MissionInput({ onLaunch, mission, setMission }) {
   const [phIdx, setPhIdx] = useState(0);
   const [inputFocused, setInputFocused] = useState(false);
 
+  // Persistent mission queue (localStorage).
+  const [items, setItems] = useState(() => {
+    try {
+      const stored = localStorage.getItem('launch:queue');
+      if (!stored) return [];
+      const parsed = JSON.parse(stored);
+      return Array.isArray(parsed) ? parsed.filter(i => i && typeof i.text === 'string') : [];
+    } catch { return []; }
+  });
+  const [addingItem, setAddingItem] = useState(false);
+  const [newItemDraft, setNewItemDraft] = useState('');
+  const newItemInputRef = useRef(null);
+
+  useEffect(() => {
+    try { localStorage.setItem('launch:queue', JSON.stringify(items)); } catch {}
+  }, [items]);
+
+  useEffect(() => {
+    if (addingItem) {
+      const t = setTimeout(() => newItemInputRef.current?.focus(), 0);
+      return () => clearTimeout(t);
+    }
+  }, [addingItem]);
+
   useEffect(() => {
     if (mission) return;
     const id = setInterval(() => setPhIdx(i => (i + 1) % examples.length), 2400);
     return () => clearInterval(id);
   }, [mission]);
+
+  const newId = () => {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+    return `m_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  };
+
+  const handleAddItem = () => {
+    const t = newItemDraft.trim();
+    if (!t) {
+      setAddingItem(false);
+      setNewItemDraft('');
+      return;
+    }
+    setItems(prev => [{ id: newId(), text: t }, ...prev]);
+    setNewItemDraft('');
+    // Stay open for fast repeated entry; empty Enter will dismiss.
+  };
+
+  const handleDeleteItem = (id) => {
+    setItems(prev => prev.filter(item => item.id !== id));
+  };
+
+  const handleLaunchItem = (text) => {
+    setMission(text);
+    onLaunch();
+  };
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '0 0 24px', minHeight: 0 }}>
@@ -216,7 +266,7 @@ function MissionInput({ onLaunch, mission, setMission }) {
         <Telemetry time="04:32:11 UTC" code="MC-04 / READY" state="STANDBY" />
       </div>
 
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '0 24px', minHeight: 0 }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '20px 24px 0', minHeight: 0 }}>
         <Eyebrow style={{ marginBottom: 16 }}>Pre-flight</Eyebrow>
         <h1 style={{
           fontFamily: T.display, fontWeight: 600, fontSize: 38, lineHeight: 1.05,
@@ -275,28 +325,156 @@ function MissionInput({ onLaunch, mission, setMission }) {
           )}
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 18 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, marginTop: 18 }}>
           <div style={{
             fontFamily: T.mono, fontSize: 9.5, letterSpacing: '0.24em',
-            color: T.text3, textTransform: 'uppercase', marginBottom: 4,
+            color: T.text3, textTransform: 'uppercase', marginBottom: 8,
+            flexShrink: 0,
           }}>
-            Recent / Suggested
+            Mission Queue
           </div>
-          {examples.slice(0, 3).map((ex, i) => (
-            <button key={i} onClick={() => setMission(ex)} style={{
-              display: 'flex', alignItems: 'center', gap: 12,
-              background: 'rgba(255,255,255,0.025)',
-              border: `1px solid ${T.hairlineSoft}`,
-              borderRadius: 14, padding: '12px 14px',
-              fontFamily: T.display, fontSize: 14, color: T.text2,
-              cursor: 'pointer', textAlign: 'left',
-              transition: 'all 150ms',
-              WebkitAppearance: 'none', appearance: 'none',
+
+          {addingItem ? (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              background: 'rgba(255,255,255,0.04)',
+              border: `1px solid rgba(0,229,255,0.42)`,
+              borderRadius: 14, padding: '8px 8px 8px 14px',
+              boxShadow: '0 0 0 3px rgba(0,229,255,0.08), 0 0 24px rgba(0,229,255,0.10)',
+              marginBottom: 8, flexShrink: 0,
+              transition: 'all 200ms ease',
             }}>
-              <span style={{ width: 6, height: 6, borderRadius: 1, background: T.cyan, opacity: 0.5 }} />
-              {ex}
+              <input
+                ref={newItemInputRef}
+                type="text"
+                value={newItemDraft}
+                onChange={e => setNewItemDraft(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') { e.preventDefault(); handleAddItem(); }
+                  else if (e.key === 'Escape') { setAddingItem(false); setNewItemDraft(''); }
+                }}
+                placeholder="Type a mission and hit return"
+                enterKeyHint="done"
+                style={{
+                  all: 'unset',
+                  flex: 1, minWidth: 0,
+                  fontFamily: T.display, fontSize: 14, color: T.text,
+                  padding: '4px 0',
+                }}
+              />
+              <button
+                onClick={handleAddItem}
+                disabled={!newItemDraft.trim()}
+                aria-label="Save"
+                style={{
+                  all: 'unset', flexShrink: 0,
+                  cursor: newItemDraft.trim() ? 'pointer' : 'default',
+                  width: 30, height: 30, borderRadius: 99,
+                  background: newItemDraft.trim()
+                    ? `linear-gradient(180deg, ${T.cyan}, ${T.blue})`
+                    : 'rgba(255,255,255,0.05)',
+                  color: newItemDraft.trim() ? '#001018' : T.text3,
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  boxShadow: newItemDraft.trim() ? `0 0 12px ${T.cyan}88` : 'none',
+                  transition: 'all 200ms ease',
+                }}
+              >
+                <svg width="13" height="13" viewBox="0 0 13 13">
+                  <path d="M2 6.5l3 3 6-7" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </button>
+              <button
+                onClick={() => { setAddingItem(false); setNewItemDraft(''); }}
+                aria-label="Cancel"
+                style={{
+                  all: 'unset', cursor: 'pointer', flexShrink: 0,
+                  width: 30, height: 30, borderRadius: 99,
+                  background: 'rgba(255,255,255,0.04)',
+                  border: `1px solid ${T.hairlineSoft}`,
+                  color: T.text2,
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                <svg width="9" height="9" viewBox="0 0 10 10"><path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setAddingItem(true)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                background: 'rgba(168,118,255,0.08)',
+                border: `1px solid rgba(168,118,255,0.32)`,
+                borderRadius: 14, padding: '12px 14px',
+                fontFamily: T.display, fontSize: 14, fontWeight: 500,
+                color: T.purple,
+                cursor: 'pointer', textAlign: 'left',
+                transition: 'all 150ms',
+                WebkitAppearance: 'none', appearance: 'none',
+                WebkitTapHighlightColor: 'transparent',
+                marginBottom: 8, flexShrink: 0,
+                letterSpacing: '0.02em',
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14">
+                <path d="M7 1.5v11M1.5 7h11" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+              </svg>
+              Add Item
             </button>
-          ))}
+          )}
+
+          <div style={{
+            display: 'flex', flexDirection: 'column', gap: 8,
+            flex: 1, minHeight: 0, overflowY: 'auto', paddingBottom: 4,
+          }}>
+            {items.map(item => (
+              <div
+                key={item.id}
+                onClick={() => handleLaunchItem(item.text)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleLaunchItem(item.text); } }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 12,
+                  background: 'rgba(255,255,255,0.025)',
+                  border: `1px solid ${T.hairlineSoft}`,
+                  borderRadius: 14, padding: '4px 4px 4px 14px',
+                  fontFamily: T.display, fontSize: 14, color: T.text,
+                  cursor: 'pointer', textAlign: 'left',
+                  transition: 'all 150ms',
+                  WebkitTapHighlightColor: 'transparent',
+                  flexShrink: 0, minHeight: 48,
+                }}
+              >
+                <span style={{
+                  width: 6, height: 6, borderRadius: 1,
+                  background: T.cyan, opacity: 0.6, flexShrink: 0,
+                }} />
+                <span style={{
+                  flex: 1, minWidth: 0,
+                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                }}>{item.text}</span>
+                <svg width="12" height="12" viewBox="0 0 12 12" style={{ flexShrink: 0, color: T.text3 }}>
+                  <path d="M2 6h7m0 0L6 3m3 3L6 9" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleDeleteItem(item.id); }}
+                  aria-label={`Delete ${item.text}`}
+                  style={{
+                    all: 'unset', cursor: 'pointer', flexShrink: 0,
+                    width: 32, height: 32, borderRadius: 99,
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    color: T.text3,
+                    transition: 'color 150ms',
+                  }}
+                >
+                  <svg width="10" height="10" viewBox="0 0 10 10">
+                    <path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                  </svg>
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
