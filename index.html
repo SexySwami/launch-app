@@ -77,6 +77,10 @@
     100% { transform: translateY(0);   opacity: 1 }
   }
   @keyframes spin360 { to { transform: rotate(360deg) } }
+  @keyframes shimmer {
+    0%   { background-position: 200% 50% }
+    100% { background-position: -200% 50% }
+  }
 
   /* Hide native input clear/cancel chrome on iOS */
   input::-webkit-search-decoration,
@@ -257,7 +261,7 @@ function MissionInput({ onLaunch, mission, setMission }) {
 
   const handleLaunchItem = (text) => {
     setMission(text);
-    onLaunch();
+    onLaunch(text);
   };
 
   return (
@@ -306,7 +310,7 @@ function MissionInput({ onLaunch, mission, setMission }) {
             onBlur={() => setInputFocused(false)}
             placeholder={examples[phIdx]}
             enterKeyHint="go"
-            onKeyDown={e => { if (e.key === 'Enter' && mission.trim()) { e.currentTarget.blur(); onLaunch(); } }}
+            onKeyDown={e => { if (e.key === 'Enter' && mission.trim()) { e.currentTarget.blur(); onLaunch(mission); } }}
             style={{
               width: '100%', background: 'transparent', border: 'none', outline: 'none',
               fontFamily: T.display, fontSize: 22, fontWeight: 500,
@@ -479,7 +483,7 @@ function MissionInput({ onLaunch, mission, setMission }) {
       </div>
 
       <div style={{ padding: '0 24px' }}>
-        <GlowButton onClick={onLaunch} disabled={!mission.trim()}>
+        <GlowButton onClick={() => onLaunch(mission)} disabled={!mission.trim()}>
           Generate Launch Sequence
           <svg width="14" height="14" viewBox="0 0 14 14"><path d="M2 7h10M8 3l4 4-4 4" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
         </GlowButton>
@@ -554,7 +558,7 @@ function Countdown({ onComplete }) {
 // ─────────────────────────────────────────────────────────────
 // Screen 4 — Execution Step
 // ─────────────────────────────────────────────────────────────
-function ExecutionStep({ step, stepIdx, totalSteps, momentumGained, onComplete, onEditStep, mission }) {
+function ExecutionStep({ step, stepIdx, totalSteps, momentumGained, onComplete, onEditStep, mission, loading }) {
   const [exiting, setExiting] = useState(false);
   const [entering, setEntering] = useState(true);
   const [pulseMomentum, setPulseMomentum] = useState(false);
@@ -719,101 +723,162 @@ function ExecutionStep({ step, stepIdx, totalSteps, momentumGained, onComplete, 
             }} />
           ))}
 
-          <div style={{
-            display: 'inline-flex', alignSelf: 'flex-start', alignItems: 'center', gap: 10,
-            padding: '6px 12px 6px 8px', borderRadius: 99,
-            background: 'rgba(0,229,255,0.12)',
-            border: `1px solid rgba(0,229,255,0.4)`,
-            position: 'relative', zIndex: 1,
-          }}>
-            <span style={{
-              width: 22, height: 22, borderRadius: 99,
-              background: `linear-gradient(180deg, ${T.cyan}, ${T.blue})`,
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              fontFamily: T.mono, fontSize: 11, fontWeight: 700, color: '#001018',
-            }}>
-              {stepIdx + 1}
-            </span>
-            <span style={{
-              fontFamily: T.mono, fontSize: 10, letterSpacing: '0.22em',
-              color: T.cyan, textTransform: 'uppercase', fontWeight: 600,
-            }}>
-              {step.tag} · CHECKPOINT
-            </span>
-          </div>
-
-          <div style={{
-            flex: 1, display: 'flex', flexDirection: 'column',
-            alignItems: 'center', justifyContent: 'center',
-            position: 'relative', zIndex: 1, padding: '0 4px',
-          }}>
+          {loading || !step ? (
             <div style={{
-              fontFamily: T.mono, fontSize: 10, letterSpacing: '0.32em',
-              color: T.teal, textTransform: 'uppercase', marginBottom: 18,
-              textShadow: `0 0 12px ${T.teal}88`,
+              flex: 1, display: 'flex', flexDirection: 'column',
+              alignItems: 'center', justifyContent: 'center',
+              position: 'relative', zIndex: 1, padding: '20px 8px', gap: 18,
             }}>
-              ▸ Now do this
-            </div>
-            <h2 style={{
-              fontFamily: T.display, fontWeight: 600,
-              fontSize: 36, lineHeight: 1.1, letterSpacing: '-0.025em',
-              color: T.text, margin: 0, textAlign: 'center',
-              textShadow: `0 0 40px rgba(0,229,255,0.4)`,
-            }}>
-              {step.title}
-            </h2>
-            {step.hint && (
-              <p style={{
-                fontFamily: T.display, fontSize: 14, color: T.text2,
-                margin: '14px 0 0', textAlign: 'center', maxWidth: 280, lineHeight: 1.4,
+              <div style={{
+                fontFamily: T.mono, fontSize: 10, letterSpacing: '0.32em',
+                color: T.purple, textTransform: 'uppercase',
+                textShadow: `0 0 12px ${T.purple}88`,
+                display: 'inline-flex', alignItems: 'center', gap: 8,
               }}>
-                {step.hint}
-              </p>
-            )}
-          </div>
+                <span style={{
+                  width: 6, height: 6, borderRadius: 99, background: T.purple,
+                  boxShadow: `0 0 10px ${T.purple}`,
+                  animation: 'pulse 1.4s ease-in-out infinite',
+                }} />
+                Generating with Claude
+              </div>
 
-          <div style={{
-            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-            fontFamily: T.mono, fontSize: 9.5, letterSpacing: '0.22em',
-            color: T.text3, textTransform: 'uppercase', position: 'relative', zIndex: 1,
-          }}>
-            <button onClick={() => setEditOpen(true)} style={{
-              all: 'unset', cursor: 'pointer',
-              display: 'inline-flex', alignItems: 'center', gap: 6,
-              padding: '6px 10px', borderRadius: 99,
-              background: 'rgba(168,118,255,0.08)',
-              border: `1px solid rgba(168,118,255,0.32)`,
-              color: T.purple,
-              fontFamily: T.mono, fontSize: 9.5, letterSpacing: '0.2em',
-              textTransform: 'uppercase', fontWeight: 600,
-              transition: 'all 200ms ease',
-              WebkitTapHighlightColor: 'transparent',
-            }}>
-              <svg width="10" height="10" viewBox="0 0 10 10" style={{ flexShrink: 0 }}>
-                <path d="M1 9l1.5-3.5L7 1l2 2-4.5 4.5L1 9z" stroke="currentColor" strokeWidth="1" fill="none" strokeLinejoin="round"/>
-              </svg>
-              Edit step
-            </button>
-            <span>+{step.reward} on complete</span>
-          </div>
+              <h2 style={{
+                fontFamily: T.display, fontWeight: 600,
+                fontSize: 28, lineHeight: 1.15, letterSpacing: '-0.02em',
+                color: T.text, margin: 0, textAlign: 'center',
+                textShadow: `0 0 40px rgba(168,118,255,0.4)`,
+              }}>
+                Breaking your mission<br/>into checkpoints…
+              </h2>
+
+              {/* skeleton lines */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, width: '100%', maxWidth: 260, marginTop: 4 }}>
+                {[0, 1, 2, 3].map(i => (
+                  <div key={i} style={{
+                    height: 10, borderRadius: 99,
+                    background: `linear-gradient(90deg, rgba(168,118,255,0.12) 0%, rgba(0,229,255,0.22) 50%, rgba(168,118,255,0.12) 100%)`,
+                    backgroundSize: '200% 100%',
+                    animation: `shimmer 1.6s ease-in-out ${i * 0.15}s infinite`,
+                    width: `${[90, 70, 80, 60][i]}%`,
+                    alignSelf: 'center',
+                  }} />
+                ))}
+              </div>
+
+              <p style={{
+                fontFamily: T.mono, fontSize: 10, color: T.text3,
+                letterSpacing: '0.22em', textTransform: 'uppercase',
+                margin: 0, marginTop: 4, textAlign: 'center',
+              }}>
+                Tailoring 4 micro-steps to "{(mission || '').slice(0, 40)}{(mission || '').length > 40 ? '…' : ''}"
+              </p>
+            </div>
+          ) : (
+            <>
+              <div style={{
+                display: 'inline-flex', alignSelf: 'flex-start', alignItems: 'center', gap: 10,
+                padding: '6px 12px 6px 8px', borderRadius: 99,
+                background: 'rgba(0,229,255,0.12)',
+                border: `1px solid rgba(0,229,255,0.4)`,
+                position: 'relative', zIndex: 1,
+              }}>
+                <span style={{
+                  width: 22, height: 22, borderRadius: 99,
+                  background: `linear-gradient(180deg, ${T.cyan}, ${T.blue})`,
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  fontFamily: T.mono, fontSize: 11, fontWeight: 700, color: '#001018',
+                }}>
+                  {stepIdx + 1}
+                </span>
+                <span style={{
+                  fontFamily: T.mono, fontSize: 10, letterSpacing: '0.22em',
+                  color: T.cyan, textTransform: 'uppercase', fontWeight: 600,
+                }}>
+                  {step.tag} · CHECKPOINT
+                </span>
+              </div>
+
+              <div style={{
+                flex: 1, display: 'flex', flexDirection: 'column',
+                alignItems: 'center', justifyContent: 'center',
+                position: 'relative', zIndex: 1, padding: '0 4px',
+              }}>
+                <div style={{
+                  fontFamily: T.mono, fontSize: 10, letterSpacing: '0.32em',
+                  color: T.teal, textTransform: 'uppercase', marginBottom: 18,
+                  textShadow: `0 0 12px ${T.teal}88`,
+                }}>
+                  ▸ Now do this
+                </div>
+                <h2 style={{
+                  fontFamily: T.display, fontWeight: 600,
+                  fontSize: 36, lineHeight: 1.1, letterSpacing: '-0.025em',
+                  color: T.text, margin: 0, textAlign: 'center',
+                  textShadow: `0 0 40px rgba(0,229,255,0.4)`,
+                }}>
+                  {step.title}
+                </h2>
+                {step.hint && (
+                  <p style={{
+                    fontFamily: T.display, fontSize: 14, color: T.text2,
+                    margin: '14px 0 0', textAlign: 'center', maxWidth: 280, lineHeight: 1.4,
+                  }}>
+                    {step.hint}
+                  </p>
+                )}
+              </div>
+
+              <div style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                fontFamily: T.mono, fontSize: 9.5, letterSpacing: '0.22em',
+                color: T.text3, textTransform: 'uppercase', position: 'relative', zIndex: 1,
+              }}>
+                <button onClick={() => setEditOpen(true)} style={{
+                  all: 'unset', cursor: 'pointer',
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  padding: '6px 10px', borderRadius: 99,
+                  background: 'rgba(168,118,255,0.08)',
+                  border: `1px solid rgba(168,118,255,0.32)`,
+                  color: T.purple,
+                  fontFamily: T.mono, fontSize: 9.5, letterSpacing: '0.2em',
+                  textTransform: 'uppercase', fontWeight: 600,
+                  transition: 'all 200ms ease',
+                  WebkitTapHighlightColor: 'transparent',
+                }}>
+                  <svg width="10" height="10" viewBox="0 0 10 10" style={{ flexShrink: 0 }}>
+                    <path d="M1 9l1.5-3.5L7 1l2 2-4.5 4.5L1 9z" stroke="currentColor" strokeWidth="1" fill="none" strokeLinejoin="round"/>
+                  </svg>
+                  Edit step
+                </button>
+                <span>+{step.reward} on complete</span>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
       <div style={{ padding: '0 24px' }}>
-        <GlowButton onClick={handleComplete}>
-          {stepIdx + 1 === totalSteps ? 'Complete Final Step' : 'Completed'}
-          <svg width="14" height="14" viewBox="0 0 14 14">
-            <path d="M2 7.5l3 3 7-7" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
+        <GlowButton onClick={handleComplete} disabled={loading || !step}>
+          {loading || !step
+            ? 'Generating Steps…'
+            : stepIdx + 1 === totalSteps ? 'Complete Final Step' : 'Completed'}
+          {!loading && step && (
+            <svg width="14" height="14" viewBox="0 0 14 14">
+              <path d="M2 7.5l3 3 7-7" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          )}
         </GlowButton>
         <div style={{
           textAlign: 'center', marginTop: 12,
           fontFamily: T.mono, fontSize: 10, letterSpacing: '0.2em',
           color: T.text3, textTransform: 'uppercase',
         }}>
-          {stepIdx + 1 < totalSteps
-            ? `${totalSteps - stepIdx - 1} more checkpoint${totalSteps - stepIdx - 1 === 1 ? '' : 's'} to go`
-            : 'Final checkpoint · launch nearly complete'}
+          {loading || !step
+            ? 'Claude is preparing your checkpoints'
+            : stepIdx + 1 < totalSteps
+              ? `${totalSteps - stepIdx - 1} more checkpoint${totalSteps - stepIdx - 1 === 1 ? '' : 's'} to go`
+              : 'Final checkpoint · launch nearly complete'}
         </div>
       </div>
 
@@ -1756,10 +1821,9 @@ function LaunchApp() {
   const [momentum, setMomentum] = useState(232);
   const [launchesToday, setLaunchesToday] = useState(2);
   const [stepOverrides, setStepOverrides] = useState({});
-
-  useEffect(() => { setStepOverrides({}); }, [mission]);
-
-  const steps = useMemo(() => generateSteps(mission), [mission]);
+  const [steps, setSteps] = useState([]);
+  const [stepsLoading, setStepsLoading] = useState(false);
+  const [stepsError, setStepsError] = useState(null);
 
   const resolvedStep = useMemo(() => {
     const base = steps[stepIdx];
@@ -1791,9 +1855,49 @@ function LaunchApp() {
     setScreen('step');
   };
 
+  // Kick off Claude API call for step generation. Falls back to local
+  // keyword logic if the API is unreachable or errors.
+  const launchMission = async (missionText) => {
+    const m = (missionText || '').trim();
+    if (!m) return;
+    setMission(m);
+    setStepIdx(0);
+    setMomentumGained(0);
+    setStepOverrides({});
+    setSteps([]);
+    setStepsError(null);
+    setStepsLoading(true);
+    setScreen('countdown');
+
+    const canCallAPI = typeof window !== 'undefined'
+      && /^https?:$/.test(window.location?.protocol || '');
+
+    try {
+      if (!canCallAPI) throw new Error('__skip_api__');
+      const res = await fetch('/api/generate-steps', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ mission: m }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !Array.isArray(data.steps) || data.steps.length === 0) {
+        throw new Error(data.error || `Generator returned ${res.status}`);
+      }
+      setSteps(data.steps);
+    } catch (err) {
+      // Fall back to the local keyword-matched generator.
+      setSteps(generateSteps(m));
+      if (err.message !== '__skip_api__') {
+        setStepsError(err.message || 'Could not generate steps');
+      }
+    } finally {
+      setStepsLoading(false);
+    }
+  };
+
   let body = null;
   if (screen === 'input')
-    body = <MissionInput onLaunch={() => setScreen('countdown')} mission={mission} setMission={setMission} />;
+    body = <MissionInput onLaunch={launchMission} mission={mission} setMission={setMission} />;
   else if (screen === 'countdown')
     body = <Countdown onComplete={startExecution} />;
   else if (screen === 'step')
@@ -1801,11 +1905,12 @@ function LaunchApp() {
       <ExecutionStep
         step={resolvedStep}
         stepIdx={stepIdx}
-        totalSteps={steps.length}
+        totalSteps={steps.length || 4}
         momentumGained={momentumGained}
         onComplete={advanceStep}
         onEditStep={handleEditStep}
         mission={mission}
+        loading={stepsLoading || !resolvedStep}
       />
     );
   else if (screen === 'reward')
