@@ -279,8 +279,26 @@ function MissionInput({ onLaunch, mission, setMission }) {
 
   // Drag-to-reorder state
   const [drag, setDrag] = useState(null);
-  // drag = null | { id, fromIdx, startY, deltaY, dropIdx }
+  // drag = null | { id, fromIdx, startY, deltaY, dropIdx, startScrollTop }
   const itemRefs = useRef({});
+
+  // Refs used by the auto-scroll-on-edge logic.
+  const listScrollRef = useRef(null);
+  const lastPointerYRef = useRef(0);
+  const autoScrollRef = useRef({ rafId: null });
+  const dragRef = useRef(null);
+  const itemsRef = useRef([]);
+
+  useEffect(() => { dragRef.current = drag; }, [drag]);
+  useEffect(() => { itemsRef.current = items; }, [items]);
+
+  // Cancel any in-flight auto-scroll frame on unmount.
+  useEffect(() => () => {
+    if (autoScrollRef.current.rafId) {
+      cancelAnimationFrame(autoScrollRef.current.rafId);
+      autoScrollRef.current.rafId = null;
+    }
+  }, []);
 
   // Newly-appended items pulse green for ~1s and the list auto-scrolls to them.
   // Map of id → animation-delay (ms). Allows a subtle stagger across batch adds.
@@ -506,41 +524,118 @@ function MissionInput({ onLaunch, mission, setMission }) {
     }
   };
 
-  const handleDragStart = (e, item, idx) => {
-    if (e.button !== undefined && e.button !== 0) return;
-    e.preventDefault();
-    e.stopPropagation();
-    setDrag({
-      id: item.id,
-      fromIdx: idx,
-      startY: e.clientY,
-      deltaY: 0,
-      dropIdx: idx,
-    });
-    try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
+  // ── Drag + auto-scroll-on-edge helpers ────────────────────────────────
+  const AUTOSCROLL_TRIGGER = 60;   // px from top/bottom of container
+  const AUTOSCROLL_MAX_SPEED = 14; // px per frame at the edge
+
+  const stopAutoScroll = () => {
+    if (autoScrollRef.current.rafId) {
+      cancelAnimationFrame(autoScrollRef.current.rafId);
+      autoScrollRef.current.rafId = null;
+    }
   };
 
-  const handleDragMove = (e) => {
-    if (!drag) return;
-    e.preventDefault();
-    const deltaY = e.clientY - drag.startY;
-    const others = items.filter(i => i.id !== drag.id);
+  // Recomputes deltaY (pointer + scroll offset) and dropIdx for the current
+  // pointer Y. Called both from pointermove and from the auto-scroll frame.
+  const updateDragVisuals = (clientY) => {
+    const dragNow = dragRef.current;
+    if (!dragNow) return;
+    const itemsNow = itemsRef.current;
+
+    const currentScrollTop = listScrollRef.current?.scrollTop || 0;
+    const scrollDelta = currentScrollTop - (dragNow.startScrollTop || 0);
+    // Add scrollDelta so the dragged tile stays under the finger even when
+    // the container scrolls beneath it.
+    const deltaY = (clientY - dragNow.startY) + scrollDelta;
+
+    const others = itemsNow.filter(i => i.id !== dragNow.id);
     let dropIdx = others.length;
     for (let i = 0; i < others.length; i++) {
       const node = itemRefs.current[others[i].id];
       if (!node) continue;
       const rect = node.getBoundingClientRect();
       const midY = rect.top + rect.height / 2;
-      if (e.clientY < midY) { dropIdx = i; break; }
+      if (clientY < midY) { dropIdx = i; break; }
     }
-    if (dropIdx !== drag.dropIdx || deltaY !== drag.deltaY) {
+
+    if (dragNow.deltaY !== deltaY || dragNow.dropIdx !== dropIdx) {
       setDrag(d => d ? { ...d, deltaY, dropIdx } : d);
     }
   };
 
+  const autoScrollFrame = () => {
+    autoScrollRef.current.rafId = null;
+    const dragNow = dragRef.current;
+    const container = listScrollRef.current;
+    if (!dragNow || !container) return;
+
+    const rect = container.getBoundingClientRect();
+    const y = lastPointerYRef.current;
+    let speed = 0;
+    if (y < rect.top + AUTOSCROLL_TRIGGER) {
+      const ratio = Math.max(0, Math.min(1, (rect.top + AUTOSCROLL_TRIGGER - y) / AUTOSCROLL_TRIGGER));
+      speed = -Math.ceil(AUTOSCROLL_MAX_SPEED * ratio);
+    } else if (y > rect.bottom - AUTOSCROLL_TRIGGER) {
+      const ratio = Math.max(0, Math.min(1, (y - (rect.bottom - AUTOSCROLL_TRIGGER)) / AUTOSCROLL_TRIGGER));
+      speed = Math.ceil(AUTOSCROLL_MAX_SPEED * ratio);
+    }
+    if (speed === 0) return;
+
+    const maxScroll = container.scrollHeight - container.clientHeight;
+    const newScrollTop = Math.max(0, Math.min(maxScroll, container.scrollTop + speed));
+    if (newScrollTop === container.scrollTop) return; // hit edge — bail
+
+    container.scrollTop = newScrollTop;
+    updateDragVisuals(y);
+    autoScrollRef.current.rafId = requestAnimationFrame(autoScrollFrame);
+  };
+
+  const maybeStartAutoScroll = (clientY) => {
+    const container = listScrollRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    const inZone =
+      clientY < rect.top + AUTOSCROLL_TRIGGER ||
+      clientY > rect.bottom - AUTOSCROLL_TRIGGER;
+    if (inZone) {
+      if (!autoScrollRef.current.rafId) {
+        autoScrollRef.current.rafId = requestAnimationFrame(autoScrollFrame);
+      }
+    } else {
+      stopAutoScroll();
+    }
+  };
+
+  const handleDragStart = (e, item, idx) => {
+    if (e.button !== undefined && e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const startScrollTop = listScrollRef.current?.scrollTop || 0;
+    lastPointerYRef.current = e.clientY;
+    setDrag({
+      id: item.id,
+      fromIdx: idx,
+      startY: e.clientY,
+      deltaY: 0,
+      dropIdx: idx,
+      startScrollTop,
+    });
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
+  };
+
+  const handleDragMove = (e) => {
+    if (!dragRef.current) return;
+    e.preventDefault();
+    lastPointerYRef.current = e.clientY;
+    updateDragVisuals(e.clientY);
+    maybeStartAutoScroll(e.clientY);
+  };
+
   const handleDragEnd = () => {
-    if (!drag) return;
-    const { fromIdx, dropIdx } = drag;
+    stopAutoScroll();
+    const dragNow = dragRef.current;
+    if (!dragNow) return;
+    const { fromIdx, dropIdx } = dragNow;
     setDrag(null);
     if (fromIdx === dropIdx) return;
     const reordered = [...items];
@@ -797,7 +892,7 @@ function MissionInput({ onLaunch, mission, setMission }) {
             </div>
           )}
 
-          <div className="scroll-thin" style={{
+          <div ref={listScrollRef} className="scroll-thin" style={{
             display: 'flex', flexDirection: 'column', gap: 8,
             flex: 1, minHeight: 0, overflowY: 'auto', paddingBottom: 4,
           }}>
