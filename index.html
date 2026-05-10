@@ -94,6 +94,14 @@
   .new-item-highlight {
     animation: greenPulse 1s ease-out;
   }
+  @keyframes toastIn {
+    0%   { transform: translateY(24px); opacity: 0 }
+    100% { transform: translateY(0);    opacity: 1 }
+  }
+  @keyframes toastDrain {
+    0%   { width: 100% }
+    100% { width: 0%   }
+  }
 
   /* Hide native input clear/cancel chrome on iOS */
   input::-webkit-search-decoration,
@@ -300,6 +308,23 @@ function MissionInput({ onLaunch, mission, setMission }) {
     }
   }, []);
 
+  // Shake-to-undo / Undo-toast state. pendingUndo holds the most recently
+  // deleted item; cleared after 10s or on the next delete.
+  const [pendingUndo, setPendingUndo] = useState(null);
+  const undoTimeoutRef = useRef(null);
+  const lastShakeRef = useRef(0);
+  const [motionPermission, setMotionPermission] = useState(() => {
+    if (typeof window === 'undefined' || typeof window.DeviceMotionEvent === 'undefined') {
+      return 'unsupported';
+    }
+    if (typeof DeviceMotionEvent.requestPermission === 'function') return 'default';
+    return 'granted'; // browsers without the permission API expose events freely
+  });
+
+  useEffect(() => () => {
+    if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current);
+  }, []);
+
   // Newly-appended items pulse green for ~1s and the list auto-scrolls to them.
   // Map of id → animation-delay (ms). Allows a subtle stagger across batch adds.
   const [highlightedIds, setHighlightedIds] = useState(() => new Map());
@@ -475,10 +500,34 @@ function MissionInput({ onLaunch, mission, setMission }) {
   };
 
   const handleDeleteItem = async (id) => {
+    // FIRST — request DeviceMotion permission synchronously inside the user
+    // gesture (iOS 13+ requirement). Anything async after this would lose
+    // the user-activation flag.
+    if (motionPermission === 'default'
+        && typeof window.DeviceMotionEvent !== 'undefined'
+        && typeof DeviceMotionEvent.requestPermission === 'function') {
+      DeviceMotionEvent.requestPermission()
+        .then(result => setMotionPermission(result === 'granted' ? 'granted' : 'denied'))
+        .catch(() => setMotionPermission('denied'));
+    }
+
     if (!canCallAPI) {
       setItemsError('Deleting requires the deployed app (cloud sync)');
       return;
     }
+
+    const idx = items.findIndex(item => item.id === id);
+    const itemToDelete = items.find(item => item.id === id);
+    if (idx === -1 || !itemToDelete) return;
+
+    // Save undo snapshot — overwrites any previous, restarts the 10s timer.
+    if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current);
+    setPendingUndo({ item: itemToDelete, originalIndex: idx, deletedAt: Date.now() });
+    undoTimeoutRef.current = setTimeout(() => {
+      setPendingUndo(null);
+      undoTimeoutRef.current = null;
+    }, 10000);
+
     // Optimistic update — snap it out of the list immediately.
     const before = items;
     setItems(prev => prev.filter(item => item.id !== id));
@@ -489,9 +538,83 @@ function MissionInput({ onLaunch, mission, setMission }) {
       if (Array.isArray(data.items)) setItems(data.items);
     } catch (err) {
       setItems(before); // rollback
+      setPendingUndo(null);
+      if (undoTimeoutRef.current) {
+        clearTimeout(undoTimeoutRef.current);
+        undoTimeoutRef.current = null;
+      }
       setItemsError(err.message || 'Could not delete item');
     }
   };
+
+  const handleUndoDelete = async () => {
+    if (!pendingUndo) return;
+    const { item, originalIndex } = pendingUndo;
+
+    if (undoTimeoutRef.current) {
+      clearTimeout(undoTimeoutRef.current);
+      undoTimeoutRef.current = null;
+    }
+    setPendingUndo(null);
+
+    // Insert at original position (clamped to current length so subsequent
+    // deletes/adds during the undo window don't blow up the splice).
+    const targetIndex = Math.min(originalIndex, items.length);
+    const restored = [...items];
+    restored.splice(targetIndex, 0, item);
+
+    // Optimistic update + green-pulse highlight + auto-scroll
+    const before = items;
+    setItems(restored);
+    highlightAddedItems([item]);
+
+    if (!canCallAPI) return;
+    try {
+      const res = await fetch('/api/queue', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ items: restored }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Failed (${res.status})`);
+      if (Array.isArray(data.items)) setItems(data.items);
+    } catch (err) {
+      setItems(before);
+      setItemsError(err.message || 'Could not restore item');
+    }
+  };
+
+  // Shake-to-undo — only listens while there's a pending undo and the
+  // device-motion permission was granted.
+  useEffect(() => {
+    if (motionPermission !== 'granted' || !pendingUndo) return;
+
+    const SHAKE_THRESHOLD = 15;     // m/s² of true acceleration (no gravity)
+    const SHAKE_DEBOUNCE_MS = 1500; // gap between accepted shakes
+
+    const handler = (e) => {
+      let mag;
+      if (e.acceleration && e.acceleration.x !== null) {
+        const a = e.acceleration;
+        mag = Math.sqrt((a.x || 0) ** 2 + (a.y || 0) ** 2 + (a.z || 0) ** 2);
+      } else if (e.accelerationIncludingGravity) {
+        const a = e.accelerationIncludingGravity;
+        const total = Math.sqrt((a.x || 0) ** 2 + (a.y || 0) ** 2 + (a.z || 0) ** 2);
+        mag = Math.abs(total - 9.8); // strip approximate gravity baseline
+      } else { return; }
+
+      if (mag > SHAKE_THRESHOLD) {
+        const now = Date.now();
+        if (now - lastShakeRef.current > SHAKE_DEBOUNCE_MS) {
+          lastShakeRef.current = now;
+          handleUndoDelete();
+        }
+      }
+    };
+
+    window.addEventListener('devicemotion', handler);
+    return () => window.removeEventListener('devicemotion', handler);
+  }, [motionPermission, pendingUndo]);
 
   const handleLaunchItem = (text) => {
     if (drag) return; // ignore taps mid-drag
@@ -1099,6 +1222,77 @@ function MissionInput({ onLaunch, mission, setMission }) {
           </div>
         )}
       </div>
+
+      {pendingUndo && (
+        <div
+          key={pendingUndo.deletedAt}
+          role="status"
+          style={{
+            position: 'fixed',
+            bottom: 'calc(env(safe-area-inset-bottom, 0px) + 110px)',
+            left: 16, right: 16,
+            zIndex: 100,
+            display: 'flex', alignItems: 'center', gap: 12,
+            background: 'rgba(11, 16, 26, 0.92)',
+            border: `1px solid ${T.hairline}`,
+            borderRadius: 14,
+            padding: '11px 12px 11px 16px',
+            backdropFilter: 'blur(18px)',
+            WebkitBackdropFilter: 'blur(18px)',
+            boxShadow: '0 14px 36px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04)',
+            fontFamily: T.display,
+            animation: 'toastIn 240ms cubic-bezier(0.2, 0.8, 0.2, 1)',
+            maxWidth: 480, marginLeft: 'auto', marginRight: 'auto',
+            overflow: 'hidden',
+          }}
+        >
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{
+              fontFamily: T.mono, fontSize: 9.5, letterSpacing: '0.22em',
+              color: T.text3, textTransform: 'uppercase', marginBottom: 2,
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+            }}>
+              <span style={{
+                width: 5, height: 5, borderRadius: 99, background: T.warn,
+                boxShadow: `0 0 6px ${T.warn}`,
+              }} />
+              Item deleted
+              {motionPermission === 'granted' && (
+                <span style={{ color: T.text3, marginLeft: 4, fontSize: 9 }}>· shake to restore</span>
+              )}
+            </div>
+            <div style={{
+              fontSize: 13, color: T.text2, fontWeight: 500,
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>
+              {pendingUndo.item.text}
+            </div>
+          </div>
+          <button
+            onClick={handleUndoDelete}
+            style={{
+              all: 'unset', cursor: 'pointer', flexShrink: 0,
+              padding: '8px 16px', borderRadius: 99,
+              background: `linear-gradient(180deg, rgba(0,229,255,0.20), rgba(61,127,255,0.12))`,
+              border: `1px solid rgba(0,229,255,0.5)`,
+              color: T.text,
+              fontFamily: T.mono, fontSize: 11, letterSpacing: '0.2em',
+              fontWeight: 600, textTransform: 'uppercase',
+              boxShadow: `0 0 14px rgba(0,229,255,0.25)`,
+              WebkitTapHighlightColor: 'transparent',
+            }}
+          >
+            Undo
+          </button>
+          {/* draining progress bar — visual countdown of the 10s window */}
+          <div style={{
+            position: 'absolute', bottom: 0, left: 0, height: 2,
+            background: `linear-gradient(90deg, ${T.cyan}, ${T.blue})`,
+            boxShadow: `0 0 8px ${T.cyan}88`,
+            animation: 'toastDrain 10s linear forwards',
+          }} />
+        </div>
+      )}
     </div>
   );
 }
