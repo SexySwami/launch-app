@@ -232,11 +232,17 @@ function MissionInput({ onLaunch, mission, setMission }) {
   const [addingItem, setAddingItem] = useState(false);
   const [newItemDraft, setNewItemDraft] = useState('');
   const newItemInputRef = useRef(null);
+  const missionInputRef = useRef(null);
 
   // Drag-to-reorder state
   const [drag, setDrag] = useState(null);
   // drag = null | { id, fromIdx, startY, deltaY, dropIdx }
   const itemRefs = useRef({});
+
+  // Mission input switches into "checklist mode" when the content looks like
+  // a brain-dump: contains a newline, or exceeds a single-task length.
+  const CHECKLIST_THRESHOLD = 80;
+  const isChecklistMode = mission.includes('\n') || mission.trim().length > CHECKLIST_THRESHOLD;
 
   const canCallAPI = typeof window !== 'undefined'
     && /^https?:$/.test(window.location?.protocol || '');
@@ -292,34 +298,36 @@ function MissionInput({ onLaunch, mission, setMission }) {
     el.style.overflowY = el.scrollHeight > 240 ? 'auto' : 'hidden';
   };
 
-  // Auto-resize on draft changes (covers paste, programmatic clears, etc).
+  // Auto-resize on draft / mission changes (covers paste, programmatic clears).
   useEffect(() => {
     if (newItemInputRef.current) autoResizeTextarea(newItemInputRef.current);
   }, [newItemDraft, addingItem]);
+  useEffect(() => {
+    if (missionInputRef.current) autoResizeTextarea(missionInputRef.current);
+  }, [mission]);
 
-  const handleAddItem = async () => {
-    const text = newItemDraft.trim();
-    if (!text) {
-      setAddingItem(false);
-      setNewItemDraft('');
-      return;
+  // Shared: parse a block (or accept single line) and append to the cloud queue.
+  // Returns true on success, false if anything went wrong.
+  const submitTextAsTasks = async (text) => {
+    if (savingItem) return false;
+    if (!canCallAPI) {
+      setItemsError('Adding requires the deployed app (cloud sync)');
+      return false;
     }
-    if (savingItem || !canCallAPI) {
-      if (!canCallAPI) setItemsError('Adding requires the deployed app (cloud sync)');
-      return;
-    }
+    const trimmed = text.trim();
+    if (!trimmed) return false;
 
     setSavingItem(true);
     setItemsError(null);
     try {
-      let texts = [text];
+      let texts = [trimmed];
 
-      // Multi-line block → ask Claude to split + rewrite.
-      if (text.includes('\n')) {
+      // Multi-line OR long block → ask Claude to split + rewrite.
+      if (trimmed.includes('\n') || trimmed.length > CHECKLIST_THRESHOLD) {
         const parseRes = await fetch('/api/parse-tasks', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ text }),
+          body: JSON.stringify({ text: trimmed }),
         });
         const parseData = await parseRes.json().catch(() => ({}));
         if (!parseRes.ok) throw new Error(parseData.error || `Parse failed (${parseRes.status})`);
@@ -336,13 +344,33 @@ function MissionInput({ onLaunch, mission, setMission }) {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `Failed (${res.status})`);
       setItems(Array.isArray(data.items) ? data.items : []);
-      setNewItemDraft('');
-      // Stay open for fast repeated entry; empty Enter will dismiss.
+      return true;
     } catch (err) {
-      setItemsError(err.message || 'Could not save item');
+      setItemsError(err.message || 'Could not save');
+      return false;
     } finally {
       setSavingItem(false);
     }
+  };
+
+  const handleAddItem = async () => {
+    const text = newItemDraft.trim();
+    if (!text) {
+      setAddingItem(false);
+      setNewItemDraft('');
+      return;
+    }
+    const ok = await submitTextAsTasks(text);
+    if (ok) setNewItemDraft('');
+    // Stay open for fast repeated entry; empty Enter will dismiss.
+  };
+
+  // Bottom CTA in checklist mode: parse the main mission input into queue items.
+  const handleAddMissionToChecklist = async () => {
+    const text = mission.trim();
+    if (!text) return;
+    const ok = await submitTextAsTasks(text);
+    if (ok) setMission('');
   };
 
   const handleDeleteItem = async (id) => {
@@ -477,20 +505,39 @@ function MissionInput({ onLaunch, mission, setMission }) {
           }}>
             ▸ Mission Objective
           </div>
-          <input
+          <textarea
+            ref={missionInputRef}
             value={mission}
-            onChange={e => setMission(e.target.value)}
+            onChange={e => {
+              setMission(e.target.value);
+              autoResizeTextarea(e.target);
+            }}
             onFocus={() => setInputFocused(true)}
             onBlur={() => setInputFocused(false)}
             placeholder={examples[phIdx]}
-            enterKeyHint="go"
-            onKeyDown={e => { if (e.key === 'Enter' && mission.trim()) { e.currentTarget.blur(); onLaunch(mission); } }}
+            enterKeyHint={isChecklistMode ? 'done' : 'go'}
+            rows={1}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && !e.shiftKey && mission.trim()) {
+                e.preventDefault();
+                e.currentTarget.blur();
+                if (isChecklistMode) handleAddMissionToChecklist();
+                else onLaunch(mission);
+              }
+            }}
             style={{
-              width: '100%', background: 'transparent', border: 'none', outline: 'none',
+              all: 'unset',
+              display: 'block', boxSizing: 'border-box',
+              width: '100%',
+              background: 'transparent',
               fontFamily: T.display, fontSize: 22, fontWeight: 500,
               color: T.text, letterSpacing: '-0.01em',
+              lineHeight: 1.2,
+              minHeight: 28, maxHeight: 240,
+              resize: 'none',
+              whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+              overflowY: 'hidden',
               padding: 0,
-              WebkitAppearance: 'none', appearance: 'none',
             }}
           />
           {!mission && !inputFocused && (
@@ -800,9 +847,27 @@ function MissionInput({ onLaunch, mission, setMission }) {
       </div>
 
       <div style={{ padding: '0 24px' }}>
-        <GlowButton onClick={() => onLaunch(mission)} disabled={!mission.trim()}>
-          Generate Launch Sequence
-          <svg width="14" height="14" viewBox="0 0 14 14"><path d="M2 7h10M8 3l4 4-4 4" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        <GlowButton
+          onClick={() => isChecklistMode ? handleAddMissionToChecklist() : onLaunch(mission)}
+          disabled={!mission.trim() || (isChecklistMode && savingItem)}
+        >
+          {isChecklistMode
+            ? (savingItem ? 'Adding to Checklist…' : 'Add to Checklist')
+            : 'Generate Launch Sequence'}
+          {isChecklistMode ? (
+            savingItem ? (
+              <svg width="14" height="14" viewBox="0 0 14 14" style={{ animation: 'spin360 800ms linear infinite' }}>
+                <path d="M12 7a5 5 0 1 1-1.5-3.55M12 1.5V5H9.5" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 14 14">
+                <path d="M3 4h6M3 7h4M3 10h6" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round"/>
+                <path d="M11 5v4M9 7h4" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round"/>
+              </svg>
+            )
+          ) : (
+            <svg width="14" height="14" viewBox="0 0 14 14"><path d="M2 7h10M8 3l4 4-4 4" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          )}
         </GlowButton>
       </div>
     </div>
