@@ -81,6 +81,19 @@
     0%   { background-position: 200% 50% }
     100% { background-position: -200% 50% }
   }
+  @keyframes greenPulse {
+    0% {
+      box-shadow: 0 0 18px 5px rgba(0, 255, 110, 0.65), inset 0 0 0 1px rgba(0, 255, 110, 0.5);
+      background-color: rgba(0, 255, 110, 0.18);
+    }
+    100% {
+      box-shadow: 0 0 0 0 rgba(0, 255, 110, 0);
+      background-color: rgba(0, 255, 110, 0);
+    }
+  }
+  .new-item-highlight {
+    animation: greenPulse 1s ease-out;
+  }
 
   /* Hide native input clear/cancel chrome on iOS */
   input::-webkit-search-decoration,
@@ -269,6 +282,17 @@ function MissionInput({ onLaunch, mission, setMission }) {
   // drag = null | { id, fromIdx, startY, deltaY, dropIdx }
   const itemRefs = useRef({});
 
+  // Newly-appended items pulse green for ~1s and the list auto-scrolls to them.
+  const [highlightedIds, setHighlightedIds] = useState(() => new Set());
+  const [scrollToId, setScrollToId] = useState(null);
+
+  useEffect(() => {
+    if (!scrollToId) return;
+    const node = itemRefs.current[scrollToId];
+    if (node) node.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    setScrollToId(null);
+  }, [scrollToId, items]);
+
   // Mission input switches into "checklist mode" when the content looks like
   // a brain-dump: contains a newline, or exceeds a single-task length.
   const CHECKLIST_THRESHOLD = 80;
@@ -401,6 +425,53 @@ function MissionInput({ onLaunch, mission, setMission }) {
     if (!text) return;
     const ok = await submitTextAsTasks(text);
     if (ok) setMission('');
+  };
+
+  // Single-line "Add to Checklist" — appends to the bottom, auto-scrolls
+  // to the new item, fires the green pulse, and clears the input.
+  const handleAppendMissionToChecklist = async () => {
+    const text = mission.trim();
+    if (!text || savingItem) return;
+    if (!canCallAPI) {
+      setItemsError('Adding requires the deployed app (cloud sync)');
+      return;
+    }
+
+    setSavingItem(true);
+    setItemsError(null);
+    try {
+      const res = await fetch('/api/queue?append=1', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Failed (${res.status})`);
+
+      setItems(Array.isArray(data.items) ? data.items : []);
+      setMission('');
+
+      const addedItem = Array.isArray(data.added) ? data.added[0] : null;
+      if (addedItem) {
+        setHighlightedIds(prev => {
+          const next = new Set(prev);
+          next.add(addedItem.id);
+          return next;
+        });
+        setScrollToId(addedItem.id);
+        setTimeout(() => {
+          setHighlightedIds(prev => {
+            const next = new Set(prev);
+            next.delete(addedItem.id);
+            return next;
+          });
+        }, 1100);
+      }
+    } catch (err) {
+      setItemsError(err.message || 'Could not save');
+    } finally {
+      setSavingItem(false);
+    }
   };
 
   const handleDeleteItem = async (id) => {
@@ -778,6 +849,7 @@ function MissionInput({ onLaunch, mission, setMission }) {
                   <div
                     ref={el => { if (el) itemRefs.current[item.id] = el; else delete itemRefs.current[item.id]; }}
                     data-item-id={item.id}
+                    className={highlightedIds.has(item.id) ? 'new-item-highlight' : undefined}
                     onClick={() => handleLaunchItem(item.text)}
                     role="button"
                     tabIndex={0}
@@ -879,15 +951,13 @@ function MissionInput({ onLaunch, mission, setMission }) {
       </div>
 
       <div style={{ padding: '0 24px' }}>
-        <GlowButton
-          onClick={() => isChecklistMode ? handleAddMissionToChecklist() : onLaunch(mission)}
-          disabled={!mission.trim() || (isChecklistMode && savingItem)}
-        >
-          {isChecklistMode
-            ? (savingItem ? 'Adding to Checklist…' : 'Add to Checklist')
-            : 'Generate Launch Sequence'}
-          {isChecklistMode ? (
-            savingItem ? (
+        {isChecklistMode ? (
+          <GlowButton
+            onClick={handleAddMissionToChecklist}
+            disabled={!mission.trim() || savingItem}
+          >
+            {savingItem ? 'Adding to Checklist…' : 'Add to Checklist'}
+            {savingItem ? (
               <svg width="14" height="14" viewBox="0 0 14 14" style={{ animation: 'spin360 800ms linear infinite' }}>
                 <path d="M12 7a5 5 0 1 1-1.5-3.55M12 1.5V5H9.5" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
@@ -896,11 +966,58 @@ function MissionInput({ onLaunch, mission, setMission }) {
                 <path d="M3 4h6M3 7h4M3 10h6" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round"/>
                 <path d="M11 5v4M9 7h4" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round"/>
               </svg>
-            )
-          ) : (
-            <svg width="14" height="14" viewBox="0 0 14 14"><path d="M2 7h10M8 3l4 4-4 4" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
-          )}
-        </GlowButton>
+            )}
+          </GlowButton>
+        ) : (
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button
+              onClick={handleAppendMissionToChecklist}
+              disabled={!mission.trim() || savingItem}
+              style={{
+                flex: 1, height: 60, borderRadius: 18,
+                background: 'linear-gradient(180deg, rgba(0,255,110,0.10), rgba(79,227,193,0.06))',
+                border: `1px solid rgba(79,227,193,0.42)`,
+                color: T.text,
+                fontFamily: T.display, fontSize: 14, fontWeight: 600,
+                letterSpacing: '0.04em', textTransform: 'uppercase',
+                cursor: (mission.trim() && !savingItem) ? 'pointer' : 'not-allowed',
+                opacity: !mission.trim() ? 0.4 : 1,
+                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04), 0 0 18px rgba(79,227,193,0.10)',
+                transition: 'transform 120ms ease, box-shadow 200ms ease',
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                WebkitTapHighlightColor: 'transparent',
+                WebkitAppearance: 'none', appearance: 'none',
+              }}
+              onTouchStart={e => e.currentTarget.style.transform = 'scale(0.985)'}
+              onTouchEnd={e => e.currentTarget.style.transform = 'scale(1)'}
+              onMouseDown={e => e.currentTarget.style.transform = 'scale(0.985)'}
+              onMouseUp={e => e.currentTarget.style.transform = 'scale(1)'}
+              onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
+            >
+              {savingItem ? (
+                <svg width="13" height="13" viewBox="0 0 14 14" style={{ animation: 'spin360 800ms linear infinite' }}>
+                  <path d="M12 7a5 5 0 1 1-1.5-3.55M12 1.5V5H9.5" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              ) : (
+                <svg width="13" height="13" viewBox="0 0 14 14">
+                  <path d="M3 4h6M3 7h4M3 10h6" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round"/>
+                  <path d="M11 5v4M9 7h4" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round"/>
+                </svg>
+              )}
+              {savingItem ? 'Adding…' : 'Add to Checklist'}
+            </button>
+            <GlowButton
+              onClick={() => onLaunch(mission)}
+              disabled={!mission.trim()}
+              style={{ flex: 1, height: 60 }}
+            >
+              Launch
+              <svg width="14" height="14" viewBox="0 0 14 14">
+                <path d="M7 1l5 6h-3v6H5V7H2l5-6z" fill="currentColor"/>
+              </svg>
+            </GlowButton>
+          </div>
+        )}
       </div>
     </div>
   );

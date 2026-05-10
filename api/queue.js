@@ -70,6 +70,9 @@ export default async function handler(request) {
     }
 
     if (request.method === 'POST') {
+      const u = new URL(request.url);
+      const append = u.searchParams.get('append') === '1';
+
       const body = await request.json().catch(() => ({}));
 
       // Accept either { text: "..." } (single) or { texts: ["...", "..."] } (batch)
@@ -95,7 +98,7 @@ export default async function handler(request) {
         text: t,
         createdAt: Date.now(),
       }));
-      const updated = [...added, ...items];
+      const updated = append ? [...items, ...added] : [...added, ...items];
       await writeQueue(updated);
       return json({ items: updated, added }, 200);
     }
