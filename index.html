@@ -102,6 +102,10 @@
     0%   { width: 100% }
     100% { width: 0%   }
   }
+  @keyframes marqueeScroll {
+    0%   { transform: translateX(0) }
+    100% { transform: translateX(-50%) }
+  }
 
   /* Hide native input clear/cancel chrome on iOS */
   input::-webkit-search-decoration,
@@ -1639,6 +1643,99 @@ function Countdown({ onComplete }) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// MarqueeText — renders text statically when it fits, and seamlessly
+// scrolls it right-to-left in a loop when it overflows the container.
+// Used by the checkpoint badge on each execution card.
+// ─────────────────────────────────────────────────────────────
+function MarqueeText({ text, textStyle, gap = 36, pxPerSecond = 50 }) {
+  const containerRef = useRef(null);
+  const measureRef = useRef(null);
+  const [shouldScroll, setShouldScroll] = useState(false);
+  const [duration, setDuration] = useState(12);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    const measure = measureRef.current;
+    if (!container || !measure) return;
+
+    const check = () => {
+      const containerW = container.clientWidth;
+      const textW = measure.scrollWidth;
+      const overflows = textW > containerW + 1;
+      setShouldScroll(overflows);
+      if (overflows) {
+        // Speed scales with text length so longer strings don't whip by.
+        setDuration(Math.max(8, (textW + gap) / pxPerSecond));
+      }
+    };
+
+    const frame = requestAnimationFrame(check);
+    let ro;
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(check);
+      ro.observe(container);
+      ro.observe(measure);
+    }
+    if (typeof document !== 'undefined' && document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(check).catch(() => {});
+    }
+    return () => {
+      cancelAnimationFrame(frame);
+      if (ro) ro.disconnect();
+    };
+  }, [text, gap, pxPerSecond]);
+
+  const fadeMask = shouldScroll
+    ? 'linear-gradient(to right, transparent 0, black 14px, black calc(100% - 14px), transparent 100%)'
+    : 'none';
+
+  return (
+    <div
+      ref={containerRef}
+      style={{
+        flex: 1, minWidth: 0,
+        overflow: 'hidden',
+        position: 'relative',
+        maskImage: fadeMask,
+        WebkitMaskImage: fadeMask,
+      }}
+    >
+      {/* hidden width probe — always reflects single-copy width */}
+      <span
+        ref={measureRef}
+        aria-hidden="true"
+        style={{
+          ...textStyle,
+          visibility: 'hidden',
+          position: 'absolute',
+          top: 0, left: 0,
+          whiteSpace: 'nowrap',
+          pointerEvents: 'none',
+        }}
+      >
+        {text}
+      </span>
+
+      {shouldScroll ? (
+        <div
+          style={{
+            display: 'inline-flex',
+            whiteSpace: 'nowrap',
+            animation: `marqueeScroll ${duration}s linear infinite`,
+            willChange: 'transform',
+          }}
+        >
+          <span style={{ ...textStyle, paddingRight: gap }}>{text}</span>
+          <span style={{ ...textStyle, paddingRight: gap }} aria-hidden="true">{text}</span>
+        </div>
+      ) : (
+        <span style={{ ...textStyle, whiteSpace: 'nowrap' }}>{text}</span>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 // Screen 4 — Execution Step
 // ─────────────────────────────────────────────────────────────
 function ExecutionStep({ step, stepIdx, totalSteps, momentumGained, onComplete, onEditStep, onBack, mission, loading }) {
@@ -1880,26 +1977,28 @@ function ExecutionStep({ step, stepIdx, totalSteps, momentumGained, onComplete, 
           ) : (
             <>
               <div style={{
-                display: 'inline-flex', alignSelf: 'flex-start', alignItems: 'center', gap: 10,
+                display: 'flex', alignSelf: 'stretch', alignItems: 'center', gap: 10,
                 padding: '6px 12px 6px 8px', borderRadius: 99,
                 background: 'rgba(0,229,255,0.12)',
                 border: `1px solid rgba(0,229,255,0.4)`,
                 position: 'relative', zIndex: 1,
+                minWidth: 0,
               }}>
                 <span style={{
-                  width: 22, height: 22, borderRadius: 99,
+                  width: 22, height: 22, borderRadius: 99, flexShrink: 0,
                   background: `linear-gradient(180deg, ${T.cyan}, ${T.blue})`,
                   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                   fontFamily: T.mono, fontSize: 11, fontWeight: 700, color: '#001018',
                 }}>
                   {stepIdx + 1}
                 </span>
-                <span style={{
-                  fontFamily: T.mono, fontSize: 10, letterSpacing: '0.22em',
-                  color: T.cyan, textTransform: 'uppercase', fontWeight: 600,
-                }}>
-                  {step.tag} · CHECKPOINT
-                </span>
+                <MarqueeText
+                  text={(mission || '').toString()}
+                  textStyle={{
+                    fontFamily: T.mono, fontSize: 10, letterSpacing: '0.22em',
+                    color: T.cyan, textTransform: 'uppercase', fontWeight: 600,
+                  }}
+                />
               </div>
 
               <div style={{
