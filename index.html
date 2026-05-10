@@ -283,8 +283,31 @@ function MissionInput({ onLaunch, mission, setMission }) {
   const itemRefs = useRef({});
 
   // Newly-appended items pulse green for ~1s and the list auto-scrolls to them.
-  const [highlightedIds, setHighlightedIds] = useState(() => new Set());
+  // Map of id → animation-delay (ms). Allows a subtle stagger across batch adds.
+  const [highlightedIds, setHighlightedIds] = useState(() => new Map());
   const [scrollToId, setScrollToId] = useState(null);
+
+  // Tag a batch of just-added items with the green pulse, scroll to the first,
+  // then drop the tags after the slowest animation finishes.
+  const highlightAddedItems = (added) => {
+    if (!Array.isArray(added) || added.length === 0) return;
+    const STAGGER_MS = 80;
+    const ids = added.map(a => a.id);
+    setHighlightedIds(prev => {
+      const next = new Map(prev);
+      added.forEach((item, i) => next.set(item.id, i * STAGGER_MS));
+      return next;
+    });
+    setScrollToId(added[0].id);
+    const totalMs = 1000 + (added.length - 1) * STAGGER_MS + 120;
+    setTimeout(() => {
+      setHighlightedIds(prev => {
+        const next = new Map(prev);
+        ids.forEach(id => next.delete(id));
+        return next;
+      });
+    }, totalMs);
+  };
 
   useEffect(() => {
     if (!scrollToId) return;
@@ -360,16 +383,17 @@ function MissionInput({ onLaunch, mission, setMission }) {
     if (missionInputRef.current) autoResizeTextarea(missionInputRef.current);
   }, [mission]);
 
-  // Shared: parse a block (or accept single line) and append to the cloud queue.
-  // Returns true on success, false if anything went wrong.
-  const submitTextAsTasks = async (text) => {
-    if (savingItem) return false;
+  // Shared: parse a block (or accept single line) and add to the cloud queue.
+  // Returns the added items array on success, or null on failure.
+  // `append: true` puts the new items at the bottom; default prepends to top.
+  const submitTextAsTasks = async (text, { append = false } = {}) => {
+    if (savingItem) return null;
     if (!canCallAPI) {
       setItemsError('Adding requires the deployed app (cloud sync)');
-      return false;
+      return null;
     }
     const trimmed = text.trim();
-    if (!trimmed) return false;
+    if (!trimmed) return null;
 
     setSavingItem(true);
     setItemsError(null);
@@ -390,7 +414,8 @@ function MissionInput({ onLaunch, mission, setMission }) {
         texts = tasks;
       }
 
-      const res = await fetch('/api/queue', {
+      const url = append ? '/api/queue?append=1' : '/api/queue';
+      const res = await fetch(url, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(texts.length === 1 ? { text: texts[0] } : { texts }),
@@ -398,15 +423,16 @@ function MissionInput({ onLaunch, mission, setMission }) {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `Failed (${res.status})`);
       setItems(Array.isArray(data.items) ? data.items : []);
-      return true;
+      return Array.isArray(data.added) ? data.added : [];
     } catch (err) {
       setItemsError(err.message || 'Could not save');
-      return false;
+      return null;
     } finally {
       setSavingItem(false);
     }
   };
 
+  // Inline queue "Add Item" flow — prepends to the top, no green pulse.
   const handleAddItem = async () => {
     const text = newItemDraft.trim();
     if (!text) {
@@ -414,63 +440,19 @@ function MissionInput({ onLaunch, mission, setMission }) {
       setNewItemDraft('');
       return;
     }
-    const ok = await submitTextAsTasks(text);
-    if (ok) setNewItemDraft('');
+    const added = await submitTextAsTasks(text);
+    if (added !== null) setNewItemDraft('');
     // Stay open for fast repeated entry; empty Enter will dismiss.
   };
 
-  // Bottom CTA in checklist mode: parse the main mission input into queue items.
+  // Main mission input "Add to Checklist" CTA — works for both single-line and
+  // multi-line submissions. Appends to bottom, scrolls to the first new item,
+  // and fires the green pulse on every newly-added item with a subtle stagger.
   const handleAddMissionToChecklist = async () => {
-    const text = mission.trim();
-    if (!text) return;
-    const ok = await submitTextAsTasks(text);
-    if (ok) setMission('');
-  };
-
-  // Single-line "Add to Checklist" — appends to the bottom, auto-scrolls
-  // to the new item, fires the green pulse, and clears the input.
-  const handleAppendMissionToChecklist = async () => {
-    const text = mission.trim();
-    if (!text || savingItem) return;
-    if (!canCallAPI) {
-      setItemsError('Adding requires the deployed app (cloud sync)');
-      return;
-    }
-
-    setSavingItem(true);
-    setItemsError(null);
-    try {
-      const res = await fetch('/api/queue?append=1', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ text }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `Failed (${res.status})`);
-
-      setItems(Array.isArray(data.items) ? data.items : []);
+    const added = await submitTextAsTasks(mission, { append: true });
+    if (added !== null) {
       setMission('');
-
-      const addedItem = Array.isArray(data.added) ? data.added[0] : null;
-      if (addedItem) {
-        setHighlightedIds(prev => {
-          const next = new Set(prev);
-          next.add(addedItem.id);
-          return next;
-        });
-        setScrollToId(addedItem.id);
-        setTimeout(() => {
-          setHighlightedIds(prev => {
-            const next = new Set(prev);
-            next.delete(addedItem.id);
-            return next;
-          });
-        }, 1100);
-      }
-    } catch (err) {
-      setItemsError(err.message || 'Could not save');
-    } finally {
-      setSavingItem(false);
+      highlightAddedItems(added);
     }
   };
 
@@ -842,6 +824,8 @@ function MissionInput({ onLaunch, mission, setMission }) {
                 : -1;
               const showIndicatorBefore = drag && !isDragging && drag.dropIdx === othersIdx;
               const isFirstItem = idx === 0;
+              const highlightDelay = highlightedIds.get(item.id);
+              const isHighlighted = highlightDelay !== undefined;
 
               return (
                 <React.Fragment key={item.id}>
@@ -849,7 +833,7 @@ function MissionInput({ onLaunch, mission, setMission }) {
                   <div
                     ref={el => { if (el) itemRefs.current[item.id] = el; else delete itemRefs.current[item.id]; }}
                     data-item-id={item.id}
-                    className={highlightedIds.has(item.id) ? 'new-item-highlight' : undefined}
+                    className={isHighlighted ? 'new-item-highlight' : undefined}
                     onClick={() => handleLaunchItem(item.text)}
                     role="button"
                     tabIndex={0}
@@ -878,6 +862,7 @@ function MissionInput({ onLaunch, mission, setMission }) {
                         ? 'box-shadow 200ms ease, opacity 200ms ease'
                         : 'transform 220ms cubic-bezier(0.2,0.8,0.2,1), box-shadow 200ms ease, border-color 200ms ease, background 200ms ease',
                       willChange: isDragging ? 'transform' : 'auto',
+                      animationDelay: isHighlighted ? `${highlightDelay}ms` : undefined,
                     }}
                   >
                     {/* Drag handle */}
@@ -971,7 +956,7 @@ function MissionInput({ onLaunch, mission, setMission }) {
         ) : (
           <div style={{ display: 'flex', gap: 10 }}>
             <button
-              onClick={handleAppendMissionToChecklist}
+              onClick={handleAddMissionToChecklist}
               disabled={!mission.trim() || savingItem}
               style={{
                 flex: 1, height: 60, borderRadius: 18,
