@@ -87,6 +87,36 @@
   input::-webkit-search-cancel-button,
   input::-webkit-search-results-button,
   input::-webkit-search-results-decoration { display: none; }
+
+  /* Slim, cyan-tinted scrollbar — matches the mission control aesthetic.
+     Appears only when content overflows. Browsers that natively auto-hide
+     overlay scrollbars (iOS Safari, macOS) keep doing so on top of this. */
+  .scroll-thin {
+    scrollbar-width: thin;                                /* Firefox */
+    scrollbar-color: rgba(0, 229, 255, 0.32) transparent; /* Firefox: thumb track */
+  }
+  .scroll-thin::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+  .scroll-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scroll-thin::-webkit-scrollbar-thumb {
+    background-color: rgba(0, 229, 255, 0.30);
+    border-radius: 99px;
+    transition: background-color 200ms ease;
+  }
+  .scroll-thin:hover::-webkit-scrollbar-thumb,
+  .scroll-thin:focus-within::-webkit-scrollbar-thumb {
+    background-color: rgba(0, 229, 255, 0.55);
+  }
+  .scroll-thin::-webkit-scrollbar-thumb:active {
+    background-color: rgba(0, 229, 255, 0.75);
+  }
+  .scroll-thin::-webkit-scrollbar-corner {
+    background: transparent;
+  }
 </style>
 </head>
 <body>
@@ -507,6 +537,7 @@ function MissionInput({ onLaunch, mission, setMission }) {
           </div>
           <textarea
             ref={missionInputRef}
+            className="scroll-thin"
             value={mission}
             onChange={e => {
               setMission(e.target.value);
@@ -605,6 +636,7 @@ function MissionInput({ onLaunch, mission, setMission }) {
             }}>
               <textarea
                 ref={newItemInputRef}
+                className="scroll-thin"
                 value={newItemDraft}
                 onChange={e => {
                   setNewItemDraft(e.target.value);
@@ -712,7 +744,7 @@ function MissionInput({ onLaunch, mission, setMission }) {
             </div>
           )}
 
-          <div style={{
+          <div className="scroll-thin" style={{
             display: 'flex', flexDirection: 'column', gap: 8,
             flex: 1, minHeight: 0, overflowY: 'auto', paddingBottom: 4,
           }}>
