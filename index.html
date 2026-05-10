@@ -297,11 +297,17 @@ function MissionInput({ onLaunch, mission, setMission }) {
   const dragRef = useRef(null);
   const itemsRef = useRef([]);
 
-  // Long-press-to-drag refs: row-level press timer + suppression flag so a
-  // mouse click after a drop doesn't accidentally launch the just-dropped item.
-  const pressTimerRef = useRef(null);
+  // Drag refs: pressed-item snapshot + suppression flag so a click after a
+  // drop doesn't fall through to the row's tap handler.
+  const pressTimerRef = useRef(null); // kept for cleanup compatibility
   const pressedItemRef = useRef(null);
   const justEndedDragRef = useRef(false);
+
+  // Tap-to-action-menu state. selectedItemId: which row's action menu shows.
+  // editingItemId: which row's text is currently being edited inline in the
+  // mission input. Both flow through the bottom CTA region.
+  const [selectedItemId, setSelectedItemId] = useState(null);
+  const [editingItemId, setEditingItemId] = useState(null);
 
   useEffect(() => { dragRef.current = drag; }, [drag]);
   useEffect(() => { itemsRef.current = items; }, [items]);
@@ -625,9 +631,99 @@ function MissionInput({ onLaunch, mission, setMission }) {
 
   const handleLaunchItem = (text) => {
     if (drag) return; // ignore taps mid-drag
+    setSelectedItemId(null);
+    setEditingItemId(null);
     setMission(text);
     onLaunch(text);
   };
+
+  // Tap on a row toggles the action menu for that item.
+  const handleRowTap = (item) => {
+    if (justEndedDragRef.current) return;
+    if (editingItemId) return; // ignore row taps mid-edit
+    setSelectedItemId(prev => prev === item.id ? null : item.id);
+  };
+
+  // Action menu: Edit Item
+  const handleStartEdit = () => {
+    const item = items.find(i => i.id === selectedItemId);
+    if (!item) return;
+    setMission(item.text);
+    setEditingItemId(item.id);
+    setSelectedItemId(null);
+    setTimeout(() => {
+      if (missionInputRef.current) {
+        missionInputRef.current.focus();
+        // Place caret at end of pre-filled text
+        const len = missionInputRef.current.value.length;
+        try { missionInputRef.current.setSelectionRange(len, len); } catch {}
+      }
+    }, 30);
+  };
+
+  // Action menu: Launch (selected item)
+  const handleSelectedLaunch = () => {
+    const item = items.find(i => i.id === selectedItemId);
+    if (!item) return;
+    handleLaunchItem(item.text);
+  };
+
+  // Edit mode: Cancel
+  const handleCancelEdit = () => {
+    setEditingItemId(null);
+    setMission('');
+  };
+
+  // Edit mode: Save Changes
+  const handleSaveEdit = async () => {
+    const text = mission.trim();
+    const id = editingItemId;
+    if (!text || !id) return;
+
+    const updated = items.map(i => i.id === id ? { ...i, text } : i);
+    setItems(updated);
+    setEditingItemId(null);
+    setMission('');
+
+    if (!canCallAPI) return;
+    try {
+      const res = await fetch('/api/queue', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ items: updated }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Failed (${res.status})`);
+      if (Array.isArray(data.items)) setItems(data.items);
+    } catch (err) {
+      setItemsError(err.message || 'Could not save edit');
+    }
+  };
+
+  // Clear stale selection / edit state if the underlying item disappears
+  // (deleted locally, removed by a cross-device sync, etc.).
+  useEffect(() => {
+    if (selectedItemId && !items.some(i => i.id === selectedItemId)) {
+      setSelectedItemId(null);
+    }
+    if (editingItemId && !items.some(i => i.id === editingItemId)) {
+      setEditingItemId(null);
+      setMission('');
+    }
+  }, [items, selectedItemId, editingItemId]);
+
+  // Esc dismisses the action menu / cancels edit.
+  useEffect(() => {
+    if (!selectedItemId && !editingItemId) return;
+    const handler = (e) => {
+      if (e.key === 'Escape') {
+        if (editingItemId) handleCancelEdit();
+        else setSelectedItemId(null);
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [selectedItemId, editingItemId]);
 
   const handleLazyLaunch = () => {
     if (items.length === 0 || drag) return;
@@ -778,46 +874,40 @@ function MissionInput({ onLaunch, mission, setMission }) {
     reorderItems(reordered);
   };
 
-  // ── Row-level long-press → drag (entire row is the drag target) ────────
-  const PRESS_HOLD_MS = 500;
-  const PRESS_MOVE_TOLERANCE = 8;
+  // ── Row-level instant drag (entire row is the drag target) ─────────────
+  // No long-press; any movement past DRAG_MOVE_THRESHOLD activates drag.
+  const DRAG_MOVE_THRESHOLD = 5;
+
+  const activateDrag = (pressed) => {
+    const startScrollTop = listScrollRef.current?.scrollTop || 0;
+    lastPointerYRef.current = pressed.startY;
+    setDrag({
+      id: pressed.id,
+      fromIdx: pressed.idx,
+      startY: pressed.startY,
+      deltaY: 0,
+      dropIdx: pressed.idx,
+      startScrollTop,
+    });
+    try { pressed.target.setPointerCapture(pressed.pointerId); } catch {}
+    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+      try { navigator.vibrate(8); } catch {}
+    }
+  };
 
   const handleRowPointerDown = (e, item, idx) => {
     if (e.button !== undefined && e.button !== 0) return;
-    if (dragRef.current) return; // already dragging another row
+    if (dragRef.current) return;
     pressedItemRef.current = {
       id: item.id, idx,
       startX: e.clientX, startY: e.clientY,
       pointerId: e.pointerId,
       target: e.currentTarget,
     };
-    if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
-    pressTimerRef.current = setTimeout(() => {
-      pressTimerRef.current = null;
-      const pressed = pressedItemRef.current;
-      if (!pressed) return;
-      // Activate drag from the long-press position.
-      const startScrollTop = listScrollRef.current?.scrollTop || 0;
-      lastPointerYRef.current = pressed.startY;
-      setDrag({
-        id: pressed.id,
-        fromIdx: pressed.idx,
-        startY: pressed.startY,
-        deltaY: 0,
-        dropIdx: pressed.idx,
-        startScrollTop,
-      });
-      try { pressed.target.setPointerCapture(pressed.pointerId); } catch {}
-      // Subtle haptic on devices that support it.
-      if (typeof navigator !== 'undefined' && navigator.vibrate) {
-        try { navigator.vibrate(12); } catch {}
-      }
-    }, PRESS_HOLD_MS);
   };
 
   const handleRowPointerMove = (e) => {
     if (dragRef.current) {
-      // Active drag — route to the existing pointer-move logic.
       handleDragMove(e);
       return;
     }
@@ -825,12 +915,8 @@ function MissionInput({ onLaunch, mission, setMission }) {
     if (!pressed) return;
     const dx = e.clientX - pressed.startX;
     const dy = e.clientY - pressed.startY;
-    if (dx * dx + dy * dy > PRESS_MOVE_TOLERANCE * PRESS_MOVE_TOLERANCE) {
-      // Movement before press completes — likely a scroll attempt. Cancel.
-      if (pressTimerRef.current) {
-        clearTimeout(pressTimerRef.current);
-        pressTimerRef.current = null;
-      }
+    if (dx * dx + dy * dy > DRAG_MOVE_THRESHOLD * DRAG_MOVE_THRESHOLD) {
+      activateDrag(pressed);
       pressedItemRef.current = null;
     }
   };
@@ -840,19 +926,11 @@ function MissionInput({ onLaunch, mission, setMission }) {
       handleDragEnd();
       return;
     }
-    if (pressTimerRef.current) {
-      clearTimeout(pressTimerRef.current);
-      pressTimerRef.current = null;
-    }
     pressedItemRef.current = null;
-    // Click event fires next; tap → launch is handled by onClick on the row.
+    // Click event fires next; tap → action menu is handled by onClick.
   };
 
   const handleRowPointerCancel = () => {
-    if (pressTimerRef.current) {
-      clearTimeout(pressTimerRef.current);
-      pressTimerRef.current = null;
-    }
     pressedItemRef.current = null;
     if (dragRef.current) handleDragEnd();
   };
@@ -881,20 +959,26 @@ function MissionInput({ onLaunch, mission, setMission }) {
         <div style={{
           position: 'relative',
           background: 'linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))',
-          border: `1px solid ${inputFocused ? 'rgba(0,229,255,0.5)' : T.hairline}`,
+          border: `1px solid ${
+            editingItemId ? 'rgba(168,118,255,0.55)'
+            : inputFocused ? 'rgba(0,229,255,0.5)'
+            : T.hairline
+          }`,
           borderRadius: 20, padding: '20px 20px 18px',
           transition: 'all 200ms ease',
-          boxShadow: inputFocused
-            ? '0 0 0 4px rgba(0,229,255,0.08), 0 0 40px rgba(0,229,255,0.18) inset'
-            : 'inset 0 1px 0 rgba(255,255,255,0.04)',
+          boxShadow: editingItemId
+            ? '0 0 0 4px rgba(168,118,255,0.10), 0 0 40px rgba(168,118,255,0.18) inset'
+            : inputFocused
+              ? '0 0 0 4px rgba(0,229,255,0.08), 0 0 40px rgba(0,229,255,0.18) inset'
+              : 'inset 0 1px 0 rgba(255,255,255,0.04)',
         }}>
           <div style={{
             fontFamily: T.mono, fontSize: 9.5, letterSpacing: '0.24em',
-            color: inputFocused ? T.cyan : T.text3,
+            color: editingItemId ? T.purple : (inputFocused ? T.cyan : T.text3),
             textTransform: 'uppercase', marginBottom: 10,
             transition: 'color 200ms',
           }}>
-            ▸ Mission Objective
+            ▸ {editingItemId ? `Editing Item #${items.findIndex(i => i.id === editingItemId) + 1}` : 'Mission Objective'}
           </div>
           <textarea
             ref={missionInputRef}
@@ -906,15 +990,19 @@ function MissionInput({ onLaunch, mission, setMission }) {
             }}
             onFocus={() => setInputFocused(true)}
             onBlur={() => setInputFocused(false)}
-            placeholder={examples[phIdx]}
-            enterKeyHint={isChecklistMode ? 'done' : 'go'}
+            placeholder={editingItemId ? 'Edit mission text…' : examples[phIdx]}
+            enterKeyHint={editingItemId ? 'done' : isChecklistMode ? 'done' : 'go'}
             rows={1}
             onKeyDown={e => {
               if (e.key === 'Enter' && !e.shiftKey && mission.trim()) {
                 e.preventDefault();
                 e.currentTarget.blur();
-                if (isChecklistMode) handleAddMissionToChecklist();
+                if (editingItemId) handleSaveEdit();
+                else if (isChecklistMode) handleAddMissionToChecklist();
                 else onLaunch(mission);
+              } else if (e.key === 'Escape' && editingItemId) {
+                e.preventDefault();
+                handleCancelEdit();
               }
             }}
             style={{
@@ -1134,6 +1222,8 @@ function MissionInput({ onLaunch, mission, setMission }) {
               const isFirstItem = idx === 0;
               const highlightDelay = highlightedIds.get(item.id);
               const isHighlighted = highlightDelay !== undefined;
+              const isSelected = selectedItemId === item.id;
+              const isEditing = editingItemId === item.id;
 
               return (
                 <React.Fragment key={item.id}>
@@ -1142,23 +1232,29 @@ function MissionInput({ onLaunch, mission, setMission }) {
                     ref={el => { if (el) itemRefs.current[item.id] = el; else delete itemRefs.current[item.id]; }}
                     data-item-id={item.id}
                     className={isHighlighted ? 'new-item-highlight' : undefined}
-                    onClick={() => {
-                      if (justEndedDragRef.current) return; // came from a drop
-                      handleLaunchItem(item.text);
-                    }}
+                    onClick={() => handleRowTap(item)}
                     onPointerDown={(e) => handleRowPointerDown(e, item, idx)}
                     onPointerMove={handleRowPointerMove}
                     onPointerUp={handleRowPointerUp}
                     onPointerCancel={handleRowPointerCancel}
                     role="button"
                     tabIndex={0}
-                    onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleLaunchItem(item.text); } }}
+                    onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleRowTap(item); } }}
                     style={{
                       display: 'flex', alignItems: 'center', gap: 8,
-                      background: isFirstItem
-                        ? 'linear-gradient(180deg, rgba(0,229,255,0.07), rgba(255,255,255,0.025))'
-                        : 'rgba(255,255,255,0.025)',
-                      border: `1px solid ${isFirstItem ? 'rgba(0,229,255,0.32)' : T.hairlineSoft}`,
+                      background: isSelected
+                        ? 'linear-gradient(180deg, rgba(0,229,255,0.14), rgba(0,229,255,0.04))'
+                        : isEditing
+                          ? 'linear-gradient(180deg, rgba(168,118,255,0.14), rgba(168,118,255,0.04))'
+                          : isFirstItem
+                            ? 'linear-gradient(180deg, rgba(0,229,255,0.07), rgba(255,255,255,0.025))'
+                            : 'rgba(255,255,255,0.025)',
+                      border: `1px solid ${
+                        isSelected ? 'rgba(0,229,255,0.6)'
+                        : isEditing ? 'rgba(168,118,255,0.55)'
+                        : isFirstItem ? 'rgba(0,229,255,0.32)'
+                        : T.hairlineSoft
+                      }`,
                       borderRadius: 14, padding: '4px 4px 4px 4px',
                       fontFamily: T.display, fontSize: 14, color: T.text,
                       cursor: isDragging ? 'grabbing' : 'pointer', textAlign: 'left',
@@ -1171,7 +1267,13 @@ function MissionInput({ onLaunch, mission, setMission }) {
                       zIndex: isDragging ? 10 : 1,
                       boxShadow: isDragging
                         ? `0 12px 32px rgba(0,229,255,0.32), 0 0 24px rgba(0,229,255,0.20)`
-                        : isFirstItem ? `0 0 12px rgba(0,229,255,0.10)` : 'none',
+                        : isSelected
+                          ? `0 0 18px rgba(0,229,255,0.30)`
+                          : isEditing
+                            ? `0 0 18px rgba(168,118,255,0.30)`
+                            : isFirstItem
+                              ? `0 0 12px rgba(0,229,255,0.10)`
+                              : 'none',
                       opacity: isDragging ? 0.96 : 1,
                       transition: isDragging
                         ? 'box-shadow 200ms ease, opacity 200ms ease'
@@ -1219,9 +1321,27 @@ function MissionInput({ onLaunch, mission, setMission }) {
                       whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                       fontWeight: isFirstItem ? 600 : 500,
                     }}>{item.text}</span>
-                    <svg width="12" height="12" viewBox="0 0 12 12" style={{ flexShrink: 0, color: isFirstItem ? T.cyan : T.text3 }}>
-                      <path d="M2 6h7m0 0L6 3m3 3L6 9" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg>
+                    {/* Direct-launch checkmark — bypasses the action menu */}
+                    <button
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => { e.stopPropagation(); handleLaunchItem(item.text); }}
+                      aria-label={`Launch ${item.text}`}
+                      style={{
+                        all: 'unset', cursor: 'pointer', flexShrink: 0,
+                        width: 32, height: 32, borderRadius: 99,
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        color: T.cyan,
+                        background: 'rgba(0,229,255,0.10)',
+                        border: '1px solid rgba(0,229,255,0.32)',
+                        boxShadow: '0 0 10px rgba(0,229,255,0.12)',
+                        transition: 'all 150ms',
+                        WebkitTapHighlightColor: 'transparent',
+                      }}
+                    >
+                      <svg width="13" height="13" viewBox="0 0 13 13">
+                        <path d="M2 6.5l3 3 6-7" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    </button>
                     <button
                       onPointerDown={(e) => e.stopPropagation()}
                       onClick={(e) => { e.stopPropagation(); handleDeleteItem(item.id); }}
@@ -1249,7 +1369,70 @@ function MissionInput({ onLaunch, mission, setMission }) {
       </div>
 
       <div style={{ padding: '0 24px' }}>
-        {isChecklistMode ? (
+        {editingItemId ? (
+          // ── Edit-in-place CTA ────────────────────────────────────────
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button
+              onClick={handleCancelEdit}
+              style={{
+                flex: 1, height: 60, borderRadius: 18,
+                background: T.surface,
+                border: `1px solid ${T.hairline}`,
+                color: T.text2,
+                fontFamily: T.display, fontSize: 14, fontWeight: 600,
+                letterSpacing: '0.04em', textTransform: 'uppercase',
+                cursor: 'pointer',
+                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
+                WebkitTapHighlightColor: 'transparent',
+              }}
+            >
+              Cancel
+            </button>
+            <GlowButton
+              onClick={handleSaveEdit}
+              disabled={!mission.trim()}
+              style={{ flex: 1, height: 60 }}
+            >
+              Save Changes
+              <svg width="14" height="14" viewBox="0 0 14 14">
+                <path d="M2 7.5l3 3 7-7" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </GlowButton>
+          </div>
+        ) : selectedItemId ? (
+          // ── Action menu for the selected item ────────────────────────
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button
+              onClick={handleStartEdit}
+              style={{
+                flex: 1, height: 60, borderRadius: 18,
+                background: 'linear-gradient(180deg, rgba(168,118,255,0.16), rgba(168,118,255,0.06))',
+                border: `1px solid rgba(168,118,255,0.45)`,
+                color: T.text,
+                fontFamily: T.display, fontSize: 14, fontWeight: 600,
+                letterSpacing: '0.04em', textTransform: 'uppercase',
+                cursor: 'pointer',
+                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04), 0 0 18px rgba(168,118,255,0.14)',
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                WebkitTapHighlightColor: 'transparent',
+              }}
+            >
+              <svg width="13" height="13" viewBox="0 0 13 13">
+                <path d="M1.5 11.5l1.5-3.5L8 2.5l2.5 2.5-5.5 5.5L1.5 11.5z" stroke="currentColor" strokeWidth="1.2" fill="none" strokeLinejoin="round"/>
+              </svg>
+              Edit Item
+            </button>
+            <GlowButton
+              onClick={handleSelectedLaunch}
+              style={{ flex: 1, height: 60 }}
+            >
+              Launch
+              <svg width="14" height="14" viewBox="0 0 14 14">
+                <path d="M7 1l5 6h-3v6H5V7H2l5-6z" fill="currentColor"/>
+              </svg>
+            </GlowButton>
+          </div>
+        ) : isChecklistMode ? (
           <GlowButton
             onClick={handleAddMissionToChecklist}
             disabled={!mission.trim() || savingItem}
