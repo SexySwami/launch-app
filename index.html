@@ -1641,7 +1641,7 @@ function Countdown({ onComplete }) {
 // ─────────────────────────────────────────────────────────────
 // Screen 4 — Execution Step
 // ─────────────────────────────────────────────────────────────
-function ExecutionStep({ step, stepIdx, totalSteps, momentumGained, onComplete, onEditStep, mission, loading }) {
+function ExecutionStep({ step, stepIdx, totalSteps, momentumGained, onComplete, onEditStep, onBack, mission, loading }) {
   const [exiting, setExiting] = useState(false);
   const [entering, setEntering] = useState(true);
   const [pulseMomentum, setPulseMomentum] = useState(false);
@@ -1679,22 +1679,28 @@ function ExecutionStep({ step, stepIdx, totalSteps, momentumGained, onComplete, 
         state="LIVE"
       />
 
-      <div style={{ padding: '20px 24px 0' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 12 }}>
-          <div>
-            <div style={{
-              fontFamily: T.mono, fontSize: 10, letterSpacing: '0.24em',
-              color: T.text3, textTransform: 'uppercase', marginBottom: 4,
-            }}>
-              ▸ Mission Execution
-            </div>
-            <div style={{
-              fontFamily: T.display, fontSize: 18, fontWeight: 600,
-              color: T.text, letterSpacing: '-0.01em', lineHeight: 1.1,
-            }}>
-              Step <span style={{ color: T.cyan }}>{stepIdx + 1}</span> of {totalSteps}
-            </div>
-          </div>
+      <div style={{ padding: '16px 24px 0' }}>
+        {/* Row 1: back button (top-left of card) + momentum pill */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <button
+            onClick={onBack}
+            aria-label="Back to previous step"
+            style={{
+              all: 'unset', cursor: 'pointer',
+              width: 36, height: 36, borderRadius: 99,
+              background: T.surface,
+              border: `1px solid ${T.hairlineSoft}`,
+              color: T.text2,
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              transition: 'all 150ms ease',
+              WebkitTapHighlightColor: 'transparent',
+              flexShrink: 0,
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14">
+              <path d="M9 2L4 7l5 5" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </button>
 
           <div style={{
             display: 'inline-flex', alignItems: 'center', gap: 8,
@@ -1722,6 +1728,48 @@ function ExecutionStep({ step, stepIdx, totalSteps, momentumGained, onComplete, 
           </div>
         </div>
 
+        {/* Row 2: Active mission title — same across all 4 sub-steps */}
+        <div style={{ marginBottom: 14 }}>
+          <div style={{
+            fontFamily: T.mono, fontSize: 10, letterSpacing: '0.24em',
+            color: T.text3, textTransform: 'uppercase', marginBottom: 6,
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+          }}>
+            <span style={{ width: 4, height: 4, borderRadius: 99, background: T.teal, boxShadow: `0 0 6px ${T.teal}` }} />
+            Active Mission
+          </div>
+          <h2 style={{
+            fontFamily: T.display, fontSize: 22, fontWeight: 600,
+            color: T.text, letterSpacing: '-0.015em', lineHeight: 1.15,
+            margin: 0,
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+          }}>
+            {mission}
+          </h2>
+        </div>
+
+        {/* Row 3: Step counter (small) + progress bar */}
+        <div style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          marginBottom: 8,
+        }}>
+          <div style={{
+            fontFamily: T.mono, fontSize: 10, letterSpacing: '0.24em',
+            color: T.text3, textTransform: 'uppercase',
+          }}>
+            Step <span style={{ color: T.cyan, fontWeight: 700 }}>{stepIdx + 1}</span> of {totalSteps}
+          </div>
+          <div style={{
+            fontFamily: T.mono, fontSize: 9.5, letterSpacing: '0.22em',
+            color: T.text3, textTransform: 'uppercase',
+          }}>
+            Guided Execution
+          </div>
+        </div>
+
         <div style={{
           height: 6, borderRadius: 99,
           background: 'rgba(255,255,255,0.06)', overflow: 'hidden',
@@ -1740,14 +1788,6 @@ function ExecutionStep({ step, stepIdx, totalSteps, momentumGained, onComplete, 
               filter: 'blur(2px)',
             }} />
           </div>
-        </div>
-
-        <div style={{
-          fontFamily: T.mono, fontSize: 10, letterSpacing: '0.18em',
-          color: T.text3, textTransform: 'uppercase', marginTop: 12,
-          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-        }}>
-          MSN · {mission}
         </div>
       </div>
 
@@ -1854,7 +1894,7 @@ function ExecutionStep({ step, stepIdx, totalSteps, momentumGained, onComplete, 
                 letterSpacing: '0.22em', textTransform: 'uppercase',
                 margin: 0, marginTop: 4, textAlign: 'center',
               }}>
-                Tailoring 4 micro-steps to "{(mission || '').slice(0, 40)}{(mission || '').length > 40 ? '…' : ''}"
+                Tailoring 4 micro-steps for this mission
               </p>
             </div>
           ) : (
@@ -3075,6 +3115,22 @@ function LaunchApp() {
     }
   };
 
+  const handleBackStep = () => {
+    if (stepIdx > 0) {
+      // Going back undoes the previous step's reward — they're no longer "done".
+      const prevReward = steps[stepIdx - 1]?.reward || 4;
+      setMomentumGained(g => Math.max(0, g - prevReward));
+      setStepIdx(i => i - 1);
+    } else {
+      // From the first step, back exits to mission input. Mission text stays
+      // populated so the user can relaunch or edit easily.
+      setStepIdx(0);
+      setMomentumGained(0);
+      setStepOverrides({});
+      setScreen('input');
+    }
+  };
+
   const startExecution = () => {
     setStepIdx(0);
     setMomentumGained(0);
@@ -3135,6 +3191,7 @@ function LaunchApp() {
         momentumGained={momentumGained}
         onComplete={advanceStep}
         onEditStep={handleEditStep}
+        onBack={handleBackStep}
         mission={mission}
         loading={stepsLoading || !resolvedStep}
       />
