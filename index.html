@@ -633,12 +633,14 @@ function MissionInput({ onLaunch, mission, setMission }) {
     return () => window.removeEventListener('devicemotion', handler);
   }, [motionPermission, pendingUndo]);
 
-  const handleLaunchItem = (text) => {
+  // `source` (optional): { id, index } of the queue item this launch came from.
+  // null/undefined for launches via the freeform input.
+  const handleLaunchItem = (text, source) => {
     if (drag) return; // ignore taps mid-drag
     setSelectedItemId(null);
     setEditingItemId(null);
     setMission(text);
-    onLaunch(text);
+    onLaunch(text, source || null);
   };
 
   // Tap on a row toggles the action menu for that item.
@@ -667,9 +669,10 @@ function MissionInput({ onLaunch, mission, setMission }) {
 
   // Action menu: Launch (selected item)
   const handleSelectedLaunch = () => {
-    const item = items.find(i => i.id === selectedItemId);
+    const idx = items.findIndex(i => i.id === selectedItemId);
+    const item = items[idx];
     if (!item) return;
-    handleLaunchItem(item.text);
+    handleLaunchItem(item.text, { id: item.id, index: idx });
   };
 
   // Edit mode: Cancel
@@ -731,7 +734,8 @@ function MissionInput({ onLaunch, mission, setMission }) {
 
   const handleLazyLaunch = () => {
     if (items.length === 0 || drag) return;
-    handleLaunchItem(items[0].text);
+    const first = items[0];
+    handleLaunchItem(first.text, { id: first.id, index: 0 });
   };
 
   const reorderItems = async (newOrder) => {
@@ -1328,7 +1332,7 @@ function MissionInput({ onLaunch, mission, setMission }) {
                     {/* Direct-launch checkmark — bypasses the action menu */}
                     <button
                       onPointerDown={(e) => e.stopPropagation()}
-                      onClick={(e) => { e.stopPropagation(); handleLaunchItem(item.text); }}
+                      onClick={(e) => { e.stopPropagation(); handleLaunchItem(item.text, { id: item.id, index: idx }); }}
                       aria-label={`Launch ${item.text}`}
                       style={{
                         all: 'unset', cursor: 'pointer', flexShrink: 0,
@@ -1738,7 +1742,7 @@ function MarqueeText({ text, textStyle, gap = 36, pxPerSecond = 50 }) {
 // ─────────────────────────────────────────────────────────────
 // Screen 4 — Execution Step
 // ─────────────────────────────────────────────────────────────
-function ExecutionStep({ step, stepIdx, totalSteps, momentumGained, onComplete, onEditStep, onBack, mission, loading }) {
+function ExecutionStep({ step, stepIdx, totalSteps, momentumGained, onComplete, onEditStep, onBack, onLogStep, stepLogged, mission, loading }) {
   const [exiting, setExiting] = useState(false);
   const [entering, setEntering] = useState(true);
   const [pulseMomentum, setPulseMomentum] = useState(false);
@@ -2038,12 +2042,12 @@ function ExecutionStep({ step, stepIdx, totalSteps, momentumGained, onComplete, 
               }}>
                 <button onClick={() => setEditOpen(true)} style={{
                   all: 'unset', cursor: 'pointer',
-                  display: 'inline-flex', alignItems: 'center', gap: 6,
-                  padding: '6px 10px', borderRadius: 99,
+                  display: 'inline-flex', alignItems: 'center', gap: 5,
+                  padding: '6px 9px', borderRadius: 99,
                   background: 'rgba(168,118,255,0.08)',
                   border: `1px solid rgba(168,118,255,0.32)`,
                   color: T.purple,
-                  fontFamily: T.mono, fontSize: 9.5, letterSpacing: '0.2em',
+                  fontFamily: T.mono, fontSize: 9, letterSpacing: '0.18em',
                   textTransform: 'uppercase', fontWeight: 600,
                   transition: 'all 200ms ease',
                   WebkitTapHighlightColor: 'transparent',
@@ -2051,9 +2055,40 @@ function ExecutionStep({ step, stepIdx, totalSteps, momentumGained, onComplete, 
                   <svg width="10" height="10" viewBox="0 0 10 10" style={{ flexShrink: 0 }}>
                     <path d="M1 9l1.5-3.5L7 1l2 2-4.5 4.5L1 9z" stroke="currentColor" strokeWidth="1" fill="none" strokeLinejoin="round"/>
                   </svg>
-                  Edit step
+                  Edit
                 </button>
-                <span>+{step.reward} on complete</span>
+
+                <button
+                  onClick={onLogStep}
+                  disabled={stepLogged}
+                  aria-label={stepLogged ? 'Step logged' : 'Log completion'}
+                  style={{
+                    all: 'unset', cursor: stepLogged ? 'default' : 'pointer',
+                    display: 'inline-flex', alignItems: 'center', gap: 5,
+                    padding: '6px 10px', borderRadius: 99,
+                    background: stepLogged
+                      ? 'rgba(79,227,193,0.20)'
+                      : 'rgba(79,227,193,0.08)',
+                    border: `1px solid ${stepLogged ? 'rgba(79,227,193,0.6)' : 'rgba(79,227,193,0.32)'}`,
+                    color: T.teal,
+                    fontFamily: T.mono, fontSize: 9, letterSpacing: '0.18em',
+                    textTransform: 'uppercase', fontWeight: 700,
+                    transition: 'all 200ms ease',
+                    WebkitTapHighlightColor: 'transparent',
+                    boxShadow: stepLogged
+                      ? `0 0 12px rgba(79,227,193,0.32)`
+                      : 'none',
+                  }}
+                >
+                  <svg width="10" height="10" viewBox="0 0 10 10" style={{ flexShrink: 0 }}>
+                    <path d="M1 5l3 3 5-6" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                  {stepLogged ? 'Logged' : 'Log'}
+                </button>
+
+                <span style={{ fontSize: 9, letterSpacing: '0.18em' }}>
+                  +{step.reward} on complete
+                </span>
               </div>
             </>
           )}
@@ -2705,7 +2740,7 @@ function Reward({ onNext, onLog, momentum }) {
 // ─────────────────────────────────────────────────────────────
 // Screen 5b — Next Phase (interstitial after the reward)
 // ─────────────────────────────────────────────────────────────
-function NextPhase({ onKeepGoing, onAllDone, onNextTask }) {
+function NextPhase({ onKeepGoing, onAllDone, onNextTask, onSeeCompleted }) {
   const choices = [
     {
       id: 'keep',
@@ -2730,6 +2765,14 @@ function NextPhase({ onKeepGoing, onAllDone, onNextTask }) {
       color: T.purple,
       onClick: onNextTask,
       icon: <path d="M2 7h10M8 3l4 4-4 4" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round"/>,
+    },
+    {
+      id: 'log',
+      title: 'See Completed Steps',
+      sub: 'Review what you logged · across all missions',
+      color: T.blue,
+      onClick: onSeeCompleted,
+      icon: <g><path d="M2 3h10M2 7h10M2 11h7" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round"/><path d="M9.5 11.5l1 1 2-2" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round"/></g>,
     },
   ];
 
@@ -3156,6 +3199,316 @@ function generateSteps(mission) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Screen — Completed Steps
+// Lists all finalized missions, expandable to reveal their logged
+// micro-steps, with X buttons that restore the item to the active queue.
+// ─────────────────────────────────────────────────────────────
+function CompletedSteps({ onBack }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [expandedIds, setExpandedIds] = useState(() => new Set());
+  const [restoringId, setRestoringId] = useState(null);
+
+  const canCallAPI = typeof window !== 'undefined'
+    && /^https?:$/.test(window.location?.protocol || '');
+
+  useEffect(() => {
+    if (!canCallAPI) { setLoading(false); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/completed', { cache: 'no-store' });
+        const data = await res.json().catch(() => ({}));
+        if (cancelled) return;
+        if (!res.ok) throw new Error(data.error || `Failed (${res.status})`);
+        setItems(Array.isArray(data.items) ? data.items : []);
+      } catch (err) {
+        if (!cancelled) setError(err.message || 'Could not load completed list');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const toggleExpand = (id) => {
+    setExpandedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleRestore = async (id) => {
+    if (restoringId) return;
+    setRestoringId(id);
+    setError(null);
+    // Optimistic remove from this view.
+    const before = items;
+    setItems(prev => prev.filter(i => i.id !== id));
+    try {
+      const res = await fetch('/api/completed?action=restore', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Failed (${res.status})`);
+      if (Array.isArray(data.items)) setItems(data.items);
+    } catch (err) {
+      setItems(before);
+      setError(err.message || 'Could not restore item');
+    } finally {
+      setRestoringId(null);
+    }
+  };
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, padding: '8px 0 24px' }}>
+      <Telemetry
+        time={`LOG ${String(items.length).padStart(2, '0')}`}
+        code="MC-04 / COMPLETED"
+        state="ARCHIVE"
+      />
+
+      {/* Header row */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 24px 14px', flexShrink: 0 }}>
+        <button
+          onClick={onBack}
+          aria-label="Back"
+          style={{
+            all: 'unset', cursor: 'pointer', flexShrink: 0,
+            width: 36, height: 36, borderRadius: 99,
+            background: T.surface,
+            border: `1px solid ${T.hairlineSoft}`,
+            color: T.text2,
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            WebkitTapHighlightColor: 'transparent',
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14">
+            <path d="M9 2L4 7l5 5" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        </button>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <Eyebrow color={T.teal} style={{ marginBottom: 4 }}>Completed Steps</Eyebrow>
+          <div style={{
+            fontFamily: T.display, fontSize: 22, fontWeight: 600,
+            color: T.text, letterSpacing: '-0.015em', lineHeight: 1.15,
+          }}>
+            {items.length} {items.length === 1 ? 'mission' : 'missions'} logged
+          </div>
+        </div>
+      </div>
+
+      {error && (
+        <div style={{
+          fontFamily: T.mono, fontSize: 9.5, letterSpacing: '0.18em',
+          color: T.warn, textTransform: 'uppercase',
+          textAlign: 'center', padding: '0 24px 12px',
+        }}>
+          {error}
+        </div>
+      )}
+
+      {/* List */}
+      <div className="scroll-thin" style={{
+        flex: 1, minHeight: 0, overflowY: 'auto',
+        padding: '0 24px 8px',
+        display: 'flex', flexDirection: 'column', gap: 10,
+      }}>
+        {loading ? (
+          <div style={{
+            fontFamily: T.mono, fontSize: 10, letterSpacing: '0.22em',
+            color: T.text3, textTransform: 'uppercase',
+            textAlign: 'center', padding: '24px 0',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+          }}>
+            <span style={{
+              width: 6, height: 6, borderRadius: 99, background: T.cyan,
+              boxShadow: `0 0 8px ${T.cyan}`,
+              animation: 'pulse 1.2s ease-in-out infinite',
+            }} />
+            Loading completed missions…
+          </div>
+        ) : items.length === 0 ? (
+          <div style={{
+            fontFamily: T.mono, fontSize: 10, letterSpacing: '0.22em',
+            color: T.text3, textTransform: 'uppercase',
+            textAlign: 'center', padding: '40px 24px', lineHeight: 1.6,
+          }}>
+            Nothing here yet.
+            <br />
+            Complete a mission to see it logged.
+          </div>
+        ) : items.map(entry => {
+          const expanded = expandedIds.has(entry.id);
+          const microSteps = Array.isArray(entry.microSteps) ? entry.microSteps : [];
+          const hasSteps = microSteps.length > 0;
+
+          return (
+            <div key={entry.id} style={{
+              background: 'linear-gradient(180deg, rgba(79,227,193,0.06), rgba(255,255,255,0.02))',
+              border: `1px solid rgba(79,227,193,0.22)`,
+              borderRadius: 14,
+              overflow: 'hidden',
+              flexShrink: 0,
+            }}>
+              {/* Row header */}
+              <div
+                onClick={() => toggleExpand(entry.id)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleExpand(entry.id); } }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '12px 4px 12px 14px',
+                  cursor: 'pointer',
+                  WebkitTapHighlightColor: 'transparent',
+                }}
+              >
+                {/* Checkmark badge */}
+                <div style={{
+                  width: 26, height: 26, borderRadius: 99, flexShrink: 0,
+                  background: `linear-gradient(180deg, ${T.teal}, ${T.cyan})`,
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  color: '#001018',
+                  boxShadow: `0 0 12px rgba(79,227,193,0.4)`,
+                }}>
+                  <svg width="12" height="12" viewBox="0 0 12 12">
+                    <path d="M2 6l3 3 5-6" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </div>
+                {/* Text + sub-meta */}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    fontFamily: T.display, fontSize: 14, fontWeight: 600, color: T.text,
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                  }}>
+                    {entry.text}
+                  </div>
+                  <div style={{
+                    fontFamily: T.mono, fontSize: 9, letterSpacing: '0.18em',
+                    color: T.text3, textTransform: 'uppercase', marginTop: 3,
+                  }}>
+                    {microSteps.length} step{microSteps.length === 1 ? '' : 's'} logged
+                    {entry.completedAt ? ` · ${formatRelative(entry.completedAt)}` : ''}
+                  </div>
+                </div>
+                {/* Dropdown chevron */}
+                <button
+                  onClick={(e) => { e.stopPropagation(); toggleExpand(entry.id); }}
+                  aria-label={expanded ? 'Collapse' : 'Expand'}
+                  style={{
+                    all: 'unset', cursor: 'pointer', flexShrink: 0,
+                    width: 32, height: 32, borderRadius: 99,
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    color: T.text2,
+                  }}
+                >
+                  <svg
+                    width="12" height="12" viewBox="0 0 12 12"
+                    style={{ transition: 'transform 200ms ease', transform: expanded ? 'rotate(180deg)' : 'none' }}
+                  >
+                    <path d="M3 4.5l3 3 3-3" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </button>
+                {/* Remove / restore button */}
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleRestore(entry.id); }}
+                  disabled={restoringId === entry.id}
+                  aria-label="Remove from completed (restore to checklist)"
+                  style={{
+                    all: 'unset', cursor: restoringId === entry.id ? 'default' : 'pointer',
+                    flexShrink: 0,
+                    width: 32, height: 32, borderRadius: 99,
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    color: restoringId === entry.id ? T.text3 : T.text2,
+                    opacity: restoringId === entry.id ? 0.6 : 1,
+                  }}
+                >
+                  <svg width="11" height="11" viewBox="0 0 10 10">
+                    <path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+                  </svg>
+                </button>
+              </div>
+
+              {/* Expanded sub-steps */}
+              {expanded && (
+                <div style={{
+                  borderTop: `1px solid rgba(79,227,193,0.18)`,
+                  padding: '10px 14px 12px',
+                  display: 'flex', flexDirection: 'column', gap: 6,
+                }}>
+                  {hasSteps ? (
+                    microSteps.map((ms, i) => (
+                      <div key={i} style={{
+                        display: 'flex', alignItems: 'center', gap: 10,
+                        padding: '8px 10px',
+                        background: 'rgba(255,255,255,0.03)',
+                        border: `1px solid ${T.hairlineSoft}`,
+                        borderRadius: 10,
+                      }}>
+                        <div style={{
+                          width: 18, height: 18, borderRadius: 99, flexShrink: 0,
+                          background: 'rgba(79,227,193,0.16)',
+                          border: `1px solid rgba(79,227,193,0.45)`,
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          color: T.teal,
+                        }}>
+                          <svg width="9" height="9" viewBox="0 0 10 10">
+                            <path d="M1.5 5l2.5 2.5 5-5.5" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                          </svg>
+                        </div>
+                        {ms.tag && (
+                          <span style={{
+                            fontFamily: T.mono, fontSize: 9, letterSpacing: '0.18em',
+                            color: T.cyan, textTransform: 'uppercase', fontWeight: 700,
+                            flexShrink: 0,
+                          }}>
+                            {ms.tag}
+                          </span>
+                        )}
+                        <span style={{
+                          flex: 1, minWidth: 0,
+                          fontFamily: T.display, fontSize: 13, color: T.text2,
+                          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                        }}>
+                          {ms.title}
+                        </span>
+                      </div>
+                    ))
+                  ) : (
+                    <div style={{
+                      fontFamily: T.mono, fontSize: 9.5, letterSpacing: '0.18em',
+                      color: T.text3, textTransform: 'uppercase',
+                      textAlign: 'center', padding: '12px 8px',
+                    }}>
+                      No micro-steps logged for this mission
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function formatRelative(ts) {
+  if (!ts) return '';
+  const diff = Date.now() - ts;
+  if (diff < 60_000) return 'just now';
+  if (diff < 3600_000) return `${Math.floor(diff / 60_000)}m ago`;
+  if (diff < 86400_000) return `${Math.floor(diff / 3600_000)}h ago`;
+  return `${Math.floor(diff / 86400_000)}d ago`;
+}
+
+// ─────────────────────────────────────────────────────────────
 // App root
 // ─────────────────────────────────────────────────────────────
 function LaunchApp() {
@@ -3169,6 +3522,20 @@ function LaunchApp() {
   const [steps, setSteps] = useState([]);
   const [stepsLoading, setStepsLoading] = useState(false);
   const [stepsError, setStepsError] = useState(null);
+
+  // Completion-logging state.
+  // - completionGroupId: unique id for the current mission's completed-entry
+  //   in the backend. Generated when launchMission fires; reused for each
+  //   "Log Completion" tap and the final auto-save.
+  // - sourceItemId / sourceItemIndex: track which queue item this mission
+  //   came from, so we can remove it from the queue on completion and
+  //   restore it later via the X on the Completed Steps screen.
+  // - loggedSteps: set of step indices the user has explicitly logged in
+  //   this mission, so the Log button can flip to "Logged" and not double-fire.
+  const [completionGroupId, setCompletionGroupId] = useState(null);
+  const [sourceItemId, setSourceItemId] = useState(null);
+  const [sourceItemIndex, setSourceItemIndex] = useState(null);
+  const [loggedSteps, setLoggedSteps] = useState(() => new Set());
 
   const resolvedStep = useMemo(() => {
     const base = steps[stepIdx];
@@ -3185,12 +3552,82 @@ function LaunchApp() {
     const reward = steps[stepIdx]?.reward || 4;
     setMomentumGained(g => g + reward);
     if (stepIdx + 1 >= steps.length) {
+      // Final step → finalize the completion entry and remove the original
+      // queue item (if this mission came from one).
+      finalizeCompletion();
       setMomentum(m => m + 15);
       setLaunchesToday(n => n + 1);
       setStepIdx(0);
       setScreen('reward');
     } else {
       setStepIdx(i => i + 1);
+    }
+  };
+
+  const canCallAPI = typeof window !== 'undefined'
+    && /^https?:$/.test(window.location?.protocol || '');
+
+  const handleLogStep = async () => {
+    if (!completionGroupId) return false;
+    if (loggedSteps.has(stepIdx)) return false;
+    const step = steps[stepIdx];
+    if (!step) return false;
+
+    // Optimistically mark this step as logged so the button can flip state.
+    setLoggedSteps(prev => {
+      const next = new Set(prev);
+      next.add(stepIdx);
+      return next;
+    });
+
+    if (!canCallAPI) return true;
+    try {
+      await fetch('/api/completed?action=log-step', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          id: completionGroupId,
+          sourceItemId: sourceItemId || null,
+          sourceItemIndex: typeof sourceItemIndex === 'number' ? sourceItemIndex : null,
+          text: mission,
+          microStep: {
+            tag: step.tag || '',
+            title: stepOverrides[stepIdx]?.title || step.title || '',
+            hint: step.hint || '',
+          },
+        }),
+      });
+    } catch (err) {
+      // Rollback the local "logged" state so the user can retry.
+      setLoggedSteps(prev => {
+        const next = new Set(prev);
+        next.delete(stepIdx);
+        return next;
+      });
+    }
+    return true;
+  };
+
+  const finalizeCompletion = async () => {
+    if (!completionGroupId) return;
+    if (canCallAPI) {
+      try {
+        await fetch('/api/completed?action=finalize', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            id: completionGroupId,
+            sourceItemId: sourceItemId || null,
+            sourceItemIndex: typeof sourceItemIndex === 'number' ? sourceItemIndex : null,
+            text: mission,
+          }),
+        });
+        // Remove the original queue item server-side; MissionInput will
+        // refetch on remount / visibility change.
+        if (sourceItemId) {
+          await fetch(`/api/queue?id=${encodeURIComponent(sourceItemId)}`, { method: 'DELETE' });
+        }
+      } catch {}
     }
   };
 
@@ -3218,7 +3655,9 @@ function LaunchApp() {
 
   // Kick off Claude API call for step generation. Falls back to local
   // keyword logic if the API is unreachable or errors.
-  const launchMission = async (missionText) => {
+  // `source` (optional): { id, index } of the originating queue item, so we
+  // can remove it from the queue on completion and restore later if needed.
+  const launchMission = async (missionText, source) => {
     const m = (missionText || '').trim();
     if (!m) return;
     setMission(m);
@@ -3228,10 +3667,14 @@ function LaunchApp() {
     setSteps([]);
     setStepsError(null);
     setStepsLoading(true);
+    // Fresh completion session for this launch.
+    setCompletionGroupId(typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `c_${Date.now()}_${Math.random().toString(36).slice(2)}`);
+    setSourceItemId(source?.id || null);
+    setSourceItemIndex(typeof source?.index === 'number' ? source.index : null);
+    setLoggedSteps(new Set());
     setScreen('countdown');
-
-    const canCallAPI = typeof window !== 'undefined'
-      && /^https?:$/.test(window.location?.protocol || '');
 
     try {
       if (!canCallAPI) throw new Error('__skip_api__');
@@ -3271,6 +3714,8 @@ function LaunchApp() {
         onComplete={advanceStep}
         onEditStep={handleEditStep}
         onBack={handleBackStep}
+        onLogStep={handleLogStep}
+        stepLogged={loggedSteps.has(stepIdx)}
         mission={mission}
         loading={stepsLoading || !resolvedStep}
       />
@@ -3283,8 +3728,11 @@ function LaunchApp() {
         onKeepGoing={() => { setMission(''); setMomentumGained(0); setStepOverrides({}); setSteps([]); setScreen('input'); }}
         onAllDone={() => setScreen('dashboard')}
         onNextTask={() => { setMission(''); setMomentumGained(0); setStepOverrides({}); setSteps([]); setScreen('input'); }}
+        onSeeCompleted={() => setScreen('completed')}
       />
     );
+  else if (screen === 'completed')
+    body = <CompletedSteps onBack={() => setScreen('nextphase')} />;
   else if (screen === 'dashboard')
     body = <Dashboard momentum={momentum} launchesToday={launchesToday} onNewMission={() => { setMission(''); setMomentumGained(0); setScreen('input'); }} />;
 
