@@ -266,19 +266,201 @@ function DropIndicator() {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Edit-item overlay — modal/sheet for editing an existing checklist
+// item's text. Auto-expanding textarea (matches Claude's input pattern),
+// caps at 280px then scrolls. Tap-outside, Esc, or Cancel dismisses.
+// ─────────────────────────────────────────────────────────────
+function EditItemOverlay({ item, saving, onCancel, onSave }) {
+  const [text, setText] = useState(item?.text || '');
+  const taRef = useRef(null);
+
+  // Auto-resize the textarea like the rest of the app's auto-resize inputs.
+  const autoResize = (el) => {
+    if (!el) return;
+    el.style.height = 'auto';
+    const MAX = 280;
+    el.style.height = Math.min(el.scrollHeight, MAX) + 'px';
+    el.style.overflowY = el.scrollHeight > MAX ? 'auto' : 'hidden';
+  };
+
+  // Resync when the editing target changes.
+  useEffect(() => { setText(item?.text || ''); }, [item?.id]);
+
+  // Auto-resize on text change.
+  useEffect(() => { autoResize(taRef.current); }, [text]);
+
+  // Focus the textarea, place caret at end on mount.
+  useEffect(() => {
+    const ta = taRef.current;
+    if (!ta) return;
+    const t = setTimeout(() => {
+      ta.focus();
+      const len = ta.value.length;
+      try { ta.setSelectionRange(len, len); } catch {}
+      autoResize(ta);
+    }, 40);
+    return () => clearTimeout(t);
+  }, []);
+
+  // Esc to cancel.
+  useEffect(() => {
+    const h = (e) => { if (e.key === 'Escape') onCancel(); };
+    document.addEventListener('keydown', h);
+    return () => document.removeEventListener('keydown', h);
+  }, [onCancel]);
+
+  if (!item) return null;
+
+  const canSave = text.trim().length > 0 && !saving;
+
+  return (
+    <div
+      onClick={onCancel}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 200,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '20px 16px',
+        background: 'rgba(2,4,8,0.66)',
+        backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
+        animation: 'backdropIn 220ms ease',
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: '100%', maxWidth: 380,
+          background: 'linear-gradient(160deg, rgba(168,118,255,0.12), rgba(255,255,255,0.025) 55%, rgba(168,118,255,0.04))',
+          border: `1px solid rgba(168,118,255,0.5)`,
+          borderRadius: 22,
+          padding: '18px 16px 14px',
+          boxShadow: `
+            0 0 0 1px rgba(255,255,255,0.05) inset,
+            0 30px 80px rgba(0,0,0,0.6),
+            0 0 60px rgba(168,118,255,0.20)
+          `,
+          backdropFilter: 'blur(28px)', WebkitBackdropFilter: 'blur(28px)',
+          animation: 'modalIn 280ms cubic-bezier(0.2,0.8,0.2,1)',
+          position: 'relative',
+        }}
+      >
+        {/* Eyebrow */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+          <span style={{
+            width: 6, height: 6, borderRadius: 99, background: T.purple,
+            boxShadow: `0 0 8px ${T.purple}`,
+          }} />
+          <span style={{
+            fontFamily: T.mono, fontSize: 10, letterSpacing: '0.24em',
+            color: T.purple, textTransform: 'uppercase', fontWeight: 600,
+            textShadow: `0 0 8px ${T.purple}66`,
+          }}>
+            Edit Item
+          </span>
+        </div>
+
+        {/* Auto-expanding textarea */}
+        <textarea
+          ref={taRef}
+          className="scroll-thin"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey && text.trim()) {
+              e.preventDefault();
+              onSave(text);
+            }
+          }}
+          placeholder="Edit item text…"
+          rows={1}
+          enterKeyHint="done"
+          style={{
+            all: 'unset',
+            display: 'block', boxSizing: 'border-box',
+            width: '100%',
+            fontFamily: T.display, fontSize: 16, fontWeight: 500,
+            color: T.text, letterSpacing: '-0.005em',
+            lineHeight: 1.45,
+            padding: '12px 14px',
+            minHeight: 48, maxHeight: 280,
+            resize: 'none',
+            whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+            background: 'rgba(255,255,255,0.04)',
+            border: `1px solid rgba(168,118,255,0.4)`,
+            borderRadius: 14,
+            overflowY: 'hidden',
+            boxShadow: '0 0 0 3px rgba(168,118,255,0.08), inset 0 1px 0 rgba(255,255,255,0.04)',
+            marginBottom: 12,
+          }}
+        />
+
+        {/* Buttons */}
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button
+            onClick={onCancel}
+            style={{
+              flex: 1, height: 50, borderRadius: 14,
+              background: T.surface,
+              border: `1px solid ${T.hairline}`,
+              color: T.text2,
+              fontFamily: T.display, fontSize: 13, fontWeight: 600,
+              letterSpacing: '0.04em', textTransform: 'uppercase',
+              cursor: 'pointer',
+              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
+              WebkitTapHighlightColor: 'transparent',
+              all: 'unset',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => canSave && onSave(text)}
+            disabled={!canSave}
+            style={{
+              all: 'unset',
+              flex: 1, height: 50, borderRadius: 14,
+              background: canSave
+                ? `linear-gradient(180deg, rgba(0,229,255,0.22), rgba(61,127,255,0.14))`
+                : 'rgba(255,255,255,0.04)',
+              border: `1px solid ${canSave ? 'rgba(0,229,255,0.55)' : T.hairlineSoft}`,
+              color: canSave ? T.text : T.text3,
+              fontFamily: T.display, fontSize: 13, fontWeight: 600,
+              letterSpacing: '0.04em', textTransform: 'uppercase',
+              cursor: canSave ? 'pointer' : 'not-allowed',
+              boxShadow: canSave
+                ? `0 0 20px rgba(0,229,255,0.22), inset 0 1px 0 rgba(255,255,255,0.05)`
+                : 'inset 0 1px 0 rgba(255,255,255,0.04)',
+              opacity: saving ? 0.7 : 1,
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              WebkitTapHighlightColor: 'transparent',
+            }}
+          >
+            {saving ? (
+              <>
+                <svg width="12" height="12" viewBox="0 0 12 12" style={{ animation: 'spin360 800ms linear infinite' }}>
+                  <path d="M10 6a4 4 0 1 1-1.2-2.85M10 1.5V4H7.5" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+                Saving…
+              </>
+            ) : (
+              <>
+                Save
+                <svg width="12" height="12" viewBox="0 0 12 12">
+                  <path d="M2 6l3 3 5-6" stroke="currentColor" strokeWidth="1.7" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 // Screen 1 — Mission Input
 // ─────────────────────────────────────────────────────────────
 function MissionInput({ onLaunch, mission, setMission }) {
-  const examples = [
-    'Finish proposal deck',
-    'Send client follow-up',
-    'Start workout',
-    'Reply to Sarah',
-    'Outline Q3 review',
-  ];
-  const [phIdx, setPhIdx] = useState(0);
-  const [inputFocused, setInputFocused] = useState(false);
-
   // Cloud-backed mission queue (Upstash Redis via /api/queue).
   const [items, setItems] = useState([]);
   const [itemsLoading, setItemsLoading] = useState(true);
@@ -287,7 +469,6 @@ function MissionInput({ onLaunch, mission, setMission }) {
   const [addingItem, setAddingItem] = useState(false);
   const [newItemDraft, setNewItemDraft] = useState('');
   const newItemInputRef = useRef(null);
-  const missionInputRef = useRef(null);
 
   // Drag-to-reorder state
   const [drag, setDrag] = useState(null);
@@ -376,10 +557,9 @@ function MissionInput({ onLaunch, mission, setMission }) {
     setScrollToId(null);
   }, [scrollToId, items]);
 
-  // Mission input switches into "checklist mode" when the content looks like
-  // a brain-dump: contains a newline, or exceeds a single-task length.
+  // Threshold for routing pasted text through the Claude task-parser instead
+  // of treating it as a single item. Still used by the queue's Add Item flow.
   const CHECKLIST_THRESHOLD = 80;
-  const isChecklistMode = mission.includes('\n') || mission.trim().length > CHECKLIST_THRESHOLD;
 
   const canCallAPI = typeof window !== 'undefined'
     && /^https?:$/.test(window.location?.protocol || '');
@@ -421,12 +601,6 @@ function MissionInput({ onLaunch, mission, setMission }) {
     }
   }, [addingItem]);
 
-  useEffect(() => {
-    if (mission) return;
-    const id = setInterval(() => setPhIdx(i => (i + 1) % examples.length), 2400);
-    return () => clearInterval(id);
-  }, [mission]);
-
   const autoResizeTextarea = (el) => {
     if (!el) return;
     el.style.height = 'auto';
@@ -435,13 +609,10 @@ function MissionInput({ onLaunch, mission, setMission }) {
     el.style.overflowY = el.scrollHeight > 240 ? 'auto' : 'hidden';
   };
 
-  // Auto-resize on draft / mission changes (covers paste, programmatic clears).
+  // Auto-resize on the queue's inline Add-Item textarea.
   useEffect(() => {
     if (newItemInputRef.current) autoResizeTextarea(newItemInputRef.current);
   }, [newItemDraft, addingItem]);
-  useEffect(() => {
-    if (missionInputRef.current) autoResizeTextarea(missionInputRef.current);
-  }, [mission]);
 
   // Shared: parse a block (or accept single line) and add to the cloud queue.
   // Returns the added items array on success, or null on failure.
@@ -503,17 +674,6 @@ function MissionInput({ onLaunch, mission, setMission }) {
     const added = await submitTextAsTasks(text);
     if (added !== null) setNewItemDraft('');
     // Stay open for fast repeated entry; empty Enter will dismiss.
-  };
-
-  // Main mission input "Add to Checklist" CTA — works for both single-line and
-  // multi-line submissions. Appends to bottom, scrolls to the first new item,
-  // and fires the green pulse on every newly-added item with a subtle stagger.
-  const handleAddMissionToChecklist = async () => {
-    const added = await submitTextAsTasks(mission, { append: true });
-    if (added !== null) {
-      setMission('');
-      highlightAddedItems(added);
-    }
   };
 
   const handleDeleteItem = async (id) => {
@@ -651,20 +811,13 @@ function MissionInput({ onLaunch, mission, setMission }) {
   };
 
   // Action menu: Edit Item
+  // Action menu: Edit Item → opens the overlay
   const handleStartEdit = () => {
     const item = items.find(i => i.id === selectedItemId);
     if (!item) return;
-    setMission(item.text);
     setEditingItemId(item.id);
     setSelectedItemId(null);
-    setTimeout(() => {
-      if (missionInputRef.current) {
-        missionInputRef.current.focus();
-        // Place caret at end of pre-filled text
-        const len = missionInputRef.current.value.length;
-        try { missionInputRef.current.setSelectionRange(len, len); } catch {}
-      }
-    }, 30);
+    // No mission/input state to touch — the overlay manages its own text.
   };
 
   // Action menu: Launch (selected item)
@@ -675,24 +828,23 @@ function MissionInput({ onLaunch, mission, setMission }) {
     handleLaunchItem(item.text, { id: item.id, index: idx });
   };
 
-  // Edit mode: Cancel
+  // Edit overlay: Cancel
   const handleCancelEdit = () => {
     setEditingItemId(null);
-    setMission('');
   };
 
-  // Edit mode: Save Changes
-  const handleSaveEdit = async () => {
-    const text = mission.trim();
+  // Edit overlay: Save (overlay passes the new text)
+  const handleSaveEdit = async (newText) => {
+    const text = (newText || '').trim();
     const id = editingItemId;
     if (!text || !id) return;
 
+    setSavingItem(true);
     const updated = items.map(i => i.id === id ? { ...i, text } : i);
     setItems(updated);
     setEditingItemId(null);
-    setMission('');
 
-    if (!canCallAPI) return;
+    if (!canCallAPI) { setSavingItem(false); return; }
     try {
       const res = await fetch('/api/queue', {
         method: 'PUT',
@@ -704,6 +856,8 @@ function MissionInput({ onLaunch, mission, setMission }) {
       if (Array.isArray(data.items)) setItems(data.items);
     } catch (err) {
       setItemsError(err.message || 'Could not save edit');
+    } finally {
+      setSavingItem(false);
     }
   };
 
@@ -950,103 +1104,15 @@ function MissionInput({ onLaunch, mission, setMission }) {
       </div>
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '20px 24px 0', minHeight: 0 }}>
-        <Eyebrow style={{ marginBottom: 16 }}>Pre-flight</Eyebrow>
         <h1 style={{
-          fontFamily: T.display, fontWeight: 600, fontSize: 38, lineHeight: 1.05,
+          fontFamily: T.display, fontWeight: 600, fontSize: 32, lineHeight: 1.1,
           letterSpacing: '-0.02em', color: T.text, margin: 0,
+          marginBottom: 20,
         }}>
-          What mission<br/>are we launching?
+          What's the mission?
         </h1>
-        <p style={{
-          fontFamily: T.display, fontSize: 14, color: T.text2,
-          marginTop: 14, marginBottom: 28, lineHeight: 1.5, fontWeight: 400,
-        }}>
-          One task. We'll break it into checkpoints and guide you step by step.
-        </p>
 
-        <div style={{
-          position: 'relative',
-          background: 'linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))',
-          border: `1px solid ${
-            editingItemId ? 'rgba(168,118,255,0.55)'
-            : inputFocused ? 'rgba(0,229,255,0.5)'
-            : T.hairline
-          }`,
-          borderRadius: 20, padding: '20px 20px 18px',
-          transition: 'all 200ms ease',
-          boxShadow: editingItemId
-            ? '0 0 0 4px rgba(168,118,255,0.10), 0 0 40px rgba(168,118,255,0.18) inset'
-            : inputFocused
-              ? '0 0 0 4px rgba(0,229,255,0.08), 0 0 40px rgba(0,229,255,0.18) inset'
-              : 'inset 0 1px 0 rgba(255,255,255,0.04)',
-        }}>
-          <div style={{
-            fontFamily: T.mono, fontSize: 9.5, letterSpacing: '0.24em',
-            color: editingItemId ? T.purple : (inputFocused ? T.cyan : T.text3),
-            textTransform: 'uppercase', marginBottom: 10,
-            transition: 'color 200ms',
-          }}>
-            ▸ {editingItemId ? `Editing Item #${items.findIndex(i => i.id === editingItemId) + 1}` : 'Mission Objective'}
-          </div>
-          <textarea
-            ref={missionInputRef}
-            className="scroll-thin"
-            value={mission}
-            onChange={e => {
-              setMission(e.target.value);
-              autoResizeTextarea(e.target);
-            }}
-            onFocus={() => setInputFocused(true)}
-            onBlur={() => setInputFocused(false)}
-            placeholder={editingItemId ? 'Edit mission text…' : examples[phIdx]}
-            enterKeyHint={editingItemId ? 'done' : isChecklistMode ? 'done' : 'go'}
-            rows={1}
-            onKeyDown={e => {
-              if (e.key === 'Enter' && !e.shiftKey && mission.trim()) {
-                e.preventDefault();
-                e.currentTarget.blur();
-                if (editingItemId) handleSaveEdit();
-                else if (isChecklistMode) handleAddMissionToChecklist();
-                else onLaunch(mission);
-              } else if (e.key === 'Escape' && editingItemId) {
-                e.preventDefault();
-                handleCancelEdit();
-              }
-            }}
-            style={{
-              all: 'unset',
-              display: 'block', boxSizing: 'border-box',
-              width: '100%',
-              background: 'transparent',
-              fontFamily: T.display, fontSize: 22, fontWeight: 500,
-              color: T.text, letterSpacing: '-0.01em',
-              lineHeight: 1.2,
-              minHeight: 28, maxHeight: 240,
-              resize: 'none',
-              whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-              overflowY: 'hidden',
-              padding: 0,
-            }}
-          />
-          {!mission && !inputFocused && (
-            <div style={{
-              position: 'absolute', left: 20, top: 48,
-              width: 1.5, height: 24, background: T.cyan,
-              animation: 'blink 1.1s steps(2) infinite',
-              boxShadow: `0 0 8px ${T.cyan}`,
-            }} />
-          )}
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, marginTop: 18 }}>
-          <div style={{
-            fontFamily: T.mono, fontSize: 9.5, letterSpacing: '0.24em',
-            color: T.text3, textTransform: 'uppercase', marginBottom: 8,
-            flexShrink: 0,
-          }}>
-            Mission Queue
-          </div>
-
+        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
           {items.length > 0 && (
             <button
               onClick={handleLazyLaunch}
@@ -1376,39 +1442,9 @@ function MissionInput({ onLaunch, mission, setMission }) {
         </div>
       </div>
 
-      <div style={{ padding: '0 24px' }}>
-        {editingItemId ? (
-          // ── Edit-in-place CTA ────────────────────────────────────────
-          <div style={{ display: 'flex', gap: 10 }}>
-            <button
-              onClick={handleCancelEdit}
-              style={{
-                flex: 1, height: 60, borderRadius: 18,
-                background: T.surface,
-                border: `1px solid ${T.hairline}`,
-                color: T.text2,
-                fontFamily: T.display, fontSize: 14, fontWeight: 600,
-                letterSpacing: '0.04em', textTransform: 'uppercase',
-                cursor: 'pointer',
-                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
-                WebkitTapHighlightColor: 'transparent',
-              }}
-            >
-              Cancel
-            </button>
-            <GlowButton
-              onClick={handleSaveEdit}
-              disabled={!mission.trim()}
-              style={{ flex: 1, height: 60 }}
-            >
-              Save Changes
-              <svg width="14" height="14" viewBox="0 0 14 14">
-                <path d="M2 7.5l3 3 7-7" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-            </GlowButton>
-          </div>
-        ) : selectedItemId ? (
-          // ── Action menu for the selected item ────────────────────────
+      {selectedItemId && (
+        <div style={{ padding: '0 24px' }}>
+          {/* ── Action menu for the selected item ───────────────────── */}
           <div style={{ display: 'flex', gap: 10 }}>
             <button
               onClick={handleStartEdit}
@@ -1440,74 +1476,21 @@ function MissionInput({ onLaunch, mission, setMission }) {
               </svg>
             </GlowButton>
           </div>
-        ) : isChecklistMode ? (
-          <GlowButton
-            onClick={handleAddMissionToChecklist}
-            disabled={!mission.trim() || savingItem}
-          >
-            {savingItem ? 'Adding to Checklist…' : 'Add to Checklist'}
-            {savingItem ? (
-              <svg width="14" height="14" viewBox="0 0 14 14" style={{ animation: 'spin360 800ms linear infinite' }}>
-                <path d="M12 7a5 5 0 1 1-1.5-3.55M12 1.5V5H9.5" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-            ) : (
-              <svg width="14" height="14" viewBox="0 0 14 14">
-                <path d="M3 4h6M3 7h4M3 10h6" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round"/>
-                <path d="M11 5v4M9 7h4" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round"/>
-              </svg>
-            )}
-          </GlowButton>
-        ) : (
-          <div style={{ display: 'flex', gap: 10 }}>
-            <button
-              onClick={handleAddMissionToChecklist}
-              disabled={!mission.trim() || savingItem}
-              style={{
-                flex: 1, height: 60, borderRadius: 18,
-                background: 'linear-gradient(180deg, rgba(0,255,110,0.10), rgba(79,227,193,0.06))',
-                border: `1px solid rgba(79,227,193,0.42)`,
-                color: T.text,
-                fontFamily: T.display, fontSize: 14, fontWeight: 600,
-                letterSpacing: '0.04em', textTransform: 'uppercase',
-                cursor: (mission.trim() && !savingItem) ? 'pointer' : 'not-allowed',
-                opacity: !mission.trim() ? 0.4 : 1,
-                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04), 0 0 18px rgba(79,227,193,0.10)',
-                transition: 'transform 120ms ease, box-shadow 200ms ease',
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                WebkitTapHighlightColor: 'transparent',
-                WebkitAppearance: 'none', appearance: 'none',
-              }}
-              onTouchStart={e => e.currentTarget.style.transform = 'scale(0.985)'}
-              onTouchEnd={e => e.currentTarget.style.transform = 'scale(1)'}
-              onMouseDown={e => e.currentTarget.style.transform = 'scale(0.985)'}
-              onMouseUp={e => e.currentTarget.style.transform = 'scale(1)'}
-              onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
-            >
-              {savingItem ? (
-                <svg width="13" height="13" viewBox="0 0 14 14" style={{ animation: 'spin360 800ms linear infinite' }}>
-                  <path d="M12 7a5 5 0 1 1-1.5-3.55M12 1.5V5H9.5" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
-              ) : (
-                <svg width="13" height="13" viewBox="0 0 14 14">
-                  <path d="M3 4h6M3 7h4M3 10h6" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round"/>
-                  <path d="M11 5v4M9 7h4" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round"/>
-                </svg>
-              )}
-              {savingItem ? 'Adding…' : 'Add to Checklist'}
-            </button>
-            <GlowButton
-              onClick={() => onLaunch(mission)}
-              disabled={!mission.trim()}
-              style={{ flex: 1, height: 60 }}
-            >
-              Launch
-              <svg width="14" height="14" viewBox="0 0 14 14">
-                <path d="M7 1l5 6h-3v6H5V7H2l5-6z" fill="currentColor"/>
-              </svg>
-            </GlowButton>
-          </div>
-        )}
-      </div>
+        </div>
+      )}
+
+      {/* Edit-item overlay — appears centered over the screen when
+          an item's Edit action is picked. Reuses the auto-expanding
+          textarea pattern. The underlying checklist layout is
+          unchanged when this opens/closes. */}
+      {editingItemId && (
+        <EditItemOverlay
+          item={items.find(i => i.id === editingItemId)}
+          saving={savingItem}
+          onCancel={handleCancelEdit}
+          onSave={handleSaveEdit}
+        />
+      )}
 
       {pendingUndo && (
         <div
