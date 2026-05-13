@@ -266,12 +266,25 @@ function DropIndicator() {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Edit-item overlay — modal/sheet for editing an existing checklist
-// item's text. Auto-expanding textarea (matches Claude's input pattern),
-// caps at 280px then scrolls. Tap-outside, Esc, or Cancel dismisses.
+// Edit-item overlay — modal/sheet for previewing AND editing a
+// checklist item's full text.
+//
+// startMode = 'view': opens read-only — no cursor, no focus. Tapping
+// the text switches to edit mode and lets the browser place the
+// cursor at the tap point.
+//
+// startMode = 'edit': opens directly in edit mode with the textarea
+// focused and caret at end (action-menu Edit Item entry).
+//
+// Tap on the backdrop or press Esc dismisses. If the text has been
+// edited, an inline "Save changes?" panel appears with Save / Discard
+// / Keep Editing instead of dismissing immediately.
 // ─────────────────────────────────────────────────────────────
-function EditItemOverlay({ item, saving, onCancel, onSave }) {
+function EditItemOverlay({ item, saving, onCancel, onSave, startMode = 'edit' }) {
   const [text, setText] = useState(item?.text || '');
+  const [mode, setMode] = useState(startMode);
+  const [edited, setEdited] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const taRef = useRef(null);
 
   // Auto-resize the textarea like the rest of the app's auto-resize inputs.
@@ -284,13 +297,19 @@ function EditItemOverlay({ item, saving, onCancel, onSave }) {
   };
 
   // Resync when the editing target changes.
-  useEffect(() => { setText(item?.text || ''); }, [item?.id]);
-
-  // Auto-resize on text change.
-  useEffect(() => { autoResize(taRef.current); }, [text]);
-
-  // Focus the textarea, place caret at end on mount.
   useEffect(() => {
+    setText(item?.text || '');
+    setMode(startMode);
+    setEdited(false);
+    setConfirming(false);
+  }, [item?.id, startMode]);
+
+  // Auto-resize on text or mode change.
+  useEffect(() => { autoResize(taRef.current); }, [text, mode, confirming]);
+
+  // Initial focus only when starting in edit mode (action-menu entry).
+  useEffect(() => {
+    if (startMode !== 'edit') return;
     const ta = taRef.current;
     if (!ta) return;
     const t = setTimeout(() => {
@@ -302,12 +321,29 @@ function EditItemOverlay({ item, saving, onCancel, onSave }) {
     return () => clearTimeout(t);
   }, []);
 
-  // Esc to cancel.
+  const attemptDismiss = () => {
+    if (confirming) return;
+    if (edited) setConfirming(true);
+    else onCancel();
+  };
+
+  // Esc tries to dismiss (showing the confirm panel if needed).
   useEffect(() => {
-    const h = (e) => { if (e.key === 'Escape') onCancel(); };
+    const h = (e) => {
+      if (e.key !== 'Escape') return;
+      if (confirming) { setConfirming(false); return; }
+      attemptDismiss();
+    };
     document.addEventListener('keydown', h);
     return () => document.removeEventListener('keydown', h);
-  }, [onCancel]);
+  }, [confirming, edited]);
+
+  // Tap on the textarea in view mode → switch to edit mode. Setting state on
+  // pointerdown means readOnly is already false by the time the browser
+  // commits the tap, so iOS brings up the keyboard.
+  const handleTextActivate = () => {
+    if (mode === 'view') setMode('edit');
+  };
 
   if (!item) return null;
 
@@ -315,7 +351,7 @@ function EditItemOverlay({ item, saving, onCancel, onSave }) {
 
   return (
     <div
-      onClick={onCancel}
+      onClick={attemptDismiss}
       style={{
         position: 'fixed', inset: 0, zIndex: 200,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -343,115 +379,238 @@ function EditItemOverlay({ item, saving, onCancel, onSave }) {
           position: 'relative',
         }}
       >
-        {/* Eyebrow */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-          <span style={{
-            width: 6, height: 6, borderRadius: 99, background: T.purple,
-            boxShadow: `0 0 8px ${T.purple}`,
-          }} />
-          <span style={{
-            fontFamily: T.mono, fontSize: 10, letterSpacing: '0.24em',
-            color: T.purple, textTransform: 'uppercase', fontWeight: 600,
-            textShadow: `0 0 8px ${T.purple}66`,
-          }}>
-            Edit Item
-          </span>
-        </div>
+        {confirming ? (
+          // ── Unsaved-changes prompt ───────────────────────────────
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+              <span style={{
+                width: 6, height: 6, borderRadius: 99, background: T.warn,
+                boxShadow: `0 0 8px ${T.warn}`,
+              }} />
+              <span style={{
+                fontFamily: T.mono, fontSize: 10, letterSpacing: '0.24em',
+                color: T.warn, textTransform: 'uppercase', fontWeight: 600,
+              }}>
+                Unsaved Changes
+              </span>
+            </div>
+            <h3 style={{
+              fontFamily: T.display, fontSize: 20, fontWeight: 600,
+              color: T.text, margin: '0 0 6px', letterSpacing: '-0.01em',
+            }}>
+              Save your edits?
+            </h3>
+            <p style={{
+              fontFamily: T.display, fontSize: 13, color: T.text2,
+              margin: '0 0 16px', lineHeight: 1.4,
+            }}>
+              Save to keep your changes, or discard to revert this item to its previous text.
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <button
+                onClick={() => onSave(text)}
+                disabled={!canSave}
+                style={{
+                  all: 'unset',
+                  height: 48, borderRadius: 14,
+                  background: canSave
+                    ? `linear-gradient(180deg, rgba(0,229,255,0.22), rgba(61,127,255,0.14))`
+                    : 'rgba(255,255,255,0.04)',
+                  border: `1px solid ${canSave ? 'rgba(0,229,255,0.55)' : T.hairlineSoft}`,
+                  color: canSave ? T.text : T.text3,
+                  fontFamily: T.display, fontSize: 13, fontWeight: 600,
+                  letterSpacing: '0.04em', textTransform: 'uppercase',
+                  cursor: canSave ? 'pointer' : 'not-allowed',
+                  boxShadow: canSave
+                    ? `0 0 20px rgba(0,229,255,0.22), inset 0 1px 0 rgba(255,255,255,0.05)`
+                    : 'inset 0 1px 0 rgba(255,255,255,0.04)',
+                  opacity: saving ? 0.7 : 1,
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                  WebkitTapHighlightColor: 'transparent',
+                }}
+              >
+                {saving ? (
+                  <>
+                    <svg width="12" height="12" viewBox="0 0 12 12" style={{ animation: 'spin360 800ms linear infinite' }}>
+                      <path d="M10 6a4 4 0 1 1-1.2-2.85M10 1.5V4H7.5" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                    Saving…
+                  </>
+                ) : (
+                  <>
+                    Save Changes
+                    <svg width="12" height="12" viewBox="0 0 12 12">
+                      <path d="M2 6l3 3 5-6" stroke="currentColor" strokeWidth="1.7" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </>
+                )}
+              </button>
+              <button
+                onClick={onCancel}
+                style={{
+                  all: 'unset',
+                  height: 44, borderRadius: 14,
+                  background: 'rgba(255,179,71,0.08)',
+                  border: `1px solid rgba(255,179,71,0.35)`,
+                  color: T.warn,
+                  fontFamily: T.display, fontSize: 13, fontWeight: 600,
+                  letterSpacing: '0.04em', textTransform: 'uppercase',
+                  cursor: 'pointer',
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  WebkitTapHighlightColor: 'transparent',
+                }}
+              >
+                Discard
+              </button>
+              <button
+                onClick={() => setConfirming(false)}
+                style={{
+                  all: 'unset',
+                  height: 40, borderRadius: 12,
+                  background: T.surface,
+                  border: `1px solid ${T.hairlineSoft}`,
+                  color: T.text2,
+                  fontFamily: T.mono, fontSize: 11, fontWeight: 600,
+                  letterSpacing: '0.18em', textTransform: 'uppercase',
+                  cursor: 'pointer',
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  WebkitTapHighlightColor: 'transparent',
+                }}
+              >
+                Keep Editing
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Eyebrow — flips between Preview and Edit Item */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+              <span style={{
+                width: 6, height: 6, borderRadius: 99,
+                background: mode === 'view' ? T.cyan : T.purple,
+                boxShadow: `0 0 8px ${mode === 'view' ? T.cyan : T.purple}`,
+              }} />
+              <span style={{
+                fontFamily: T.mono, fontSize: 10, letterSpacing: '0.24em',
+                color: mode === 'view' ? T.cyan : T.purple,
+                textTransform: 'uppercase', fontWeight: 600,
+                textShadow: `0 0 8px ${mode === 'view' ? T.cyan : T.purple}66`,
+              }}>
+                {mode === 'view' ? 'Item Preview' : 'Edit Item'}
+              </span>
+              {mode === 'view' && (
+                <span style={{
+                  fontFamily: T.mono, fontSize: 9, letterSpacing: '0.18em',
+                  color: T.text3, textTransform: 'uppercase',
+                }}>
+                  · tap text to edit
+                </span>
+              )}
+            </div>
 
-        {/* Auto-expanding textarea */}
-        <textarea
-          ref={taRef}
-          className="scroll-thin"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey && text.trim()) {
-              e.preventDefault();
-              onSave(text);
-            }
-          }}
-          placeholder="Edit item text…"
-          rows={1}
-          enterKeyHint="done"
-          style={{
-            all: 'unset',
-            display: 'block', boxSizing: 'border-box',
-            width: '100%',
-            fontFamily: T.display, fontSize: 16, fontWeight: 500,
-            color: T.text, letterSpacing: '-0.005em',
-            lineHeight: 1.45,
-            padding: '12px 14px',
-            minHeight: 48, maxHeight: 280,
-            resize: 'none',
-            whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-            background: 'rgba(255,255,255,0.04)',
-            border: `1px solid rgba(168,118,255,0.4)`,
-            borderRadius: 14,
-            overflowY: 'hidden',
-            boxShadow: '0 0 0 3px rgba(168,118,255,0.08), inset 0 1px 0 rgba(255,255,255,0.04)',
-            marginBottom: 12,
-          }}
-        />
+            {/* Auto-expanding textarea. readOnly in view mode — tap promotes to edit. */}
+            <textarea
+              ref={taRef}
+              className="scroll-thin"
+              readOnly={mode === 'view'}
+              value={text}
+              onChange={(e) => { setText(e.target.value); setEdited(true); }}
+              onPointerDown={handleTextActivate}
+              onClick={handleTextActivate}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey && text.trim()) {
+                  e.preventDefault();
+                  onSave(text);
+                }
+              }}
+              placeholder="Item text…"
+              rows={1}
+              enterKeyHint="done"
+              style={{
+                all: 'unset',
+                display: 'block', boxSizing: 'border-box',
+                width: '100%',
+                fontFamily: T.display, fontSize: 16, fontWeight: 500,
+                color: T.text, letterSpacing: '-0.005em',
+                lineHeight: 1.45,
+                padding: '12px 14px',
+                minHeight: 48, maxHeight: 280,
+                resize: 'none',
+                whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                background: mode === 'view' ? 'rgba(255,255,255,0.025)' : 'rgba(255,255,255,0.04)',
+                border: `1px solid ${mode === 'view' ? T.hairline : 'rgba(168,118,255,0.4)'}`,
+                borderRadius: 14,
+                overflowY: 'hidden',
+                boxShadow: mode === 'edit'
+                  ? '0 0 0 3px rgba(168,118,255,0.08), inset 0 1px 0 rgba(255,255,255,0.04)'
+                  : 'inset 0 1px 0 rgba(255,255,255,0.04)',
+                marginBottom: 12,
+                cursor: mode === 'view' ? 'text' : 'auto',
+                transition: 'background 200ms ease, border-color 200ms ease, box-shadow 200ms ease',
+              }}
+            />
 
-        {/* Buttons */}
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button
-            onClick={onCancel}
-            style={{
-              flex: 1, height: 50, borderRadius: 14,
-              background: T.surface,
-              border: `1px solid ${T.hairline}`,
-              color: T.text2,
-              fontFamily: T.display, fontSize: 13, fontWeight: 600,
-              letterSpacing: '0.04em', textTransform: 'uppercase',
-              cursor: 'pointer',
-              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
-              WebkitTapHighlightColor: 'transparent',
-              all: 'unset',
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            }}
-          >
-            Cancel
-          </button>
-          <button
-            onClick={() => canSave && onSave(text)}
-            disabled={!canSave}
-            style={{
-              all: 'unset',
-              flex: 1, height: 50, borderRadius: 14,
-              background: canSave
-                ? `linear-gradient(180deg, rgba(0,229,255,0.22), rgba(61,127,255,0.14))`
-                : 'rgba(255,255,255,0.04)',
-              border: `1px solid ${canSave ? 'rgba(0,229,255,0.55)' : T.hairlineSoft}`,
-              color: canSave ? T.text : T.text3,
-              fontFamily: T.display, fontSize: 13, fontWeight: 600,
-              letterSpacing: '0.04em', textTransform: 'uppercase',
-              cursor: canSave ? 'pointer' : 'not-allowed',
-              boxShadow: canSave
-                ? `0 0 20px rgba(0,229,255,0.22), inset 0 1px 0 rgba(255,255,255,0.05)`
-                : 'inset 0 1px 0 rgba(255,255,255,0.04)',
-              opacity: saving ? 0.7 : 1,
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-              WebkitTapHighlightColor: 'transparent',
-            }}
-          >
-            {saving ? (
-              <>
-                <svg width="12" height="12" viewBox="0 0 12 12" style={{ animation: 'spin360 800ms linear infinite' }}>
-                  <path d="M10 6a4 4 0 1 1-1.2-2.85M10 1.5V4H7.5" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
-                Saving…
-              </>
-            ) : (
-              <>
-                Save
-                <svg width="12" height="12" viewBox="0 0 12 12">
-                  <path d="M2 6l3 3 5-6" stroke="currentColor" strokeWidth="1.7" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
-              </>
-            )}
-          </button>
-        </div>
+            {/* Bottom buttons */}
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                onClick={attemptDismiss}
+                style={{
+                  all: 'unset',
+                  flex: 1, height: 50, borderRadius: 14,
+                  background: T.surface,
+                  border: `1px solid ${T.hairline}`,
+                  color: T.text2,
+                  fontFamily: T.display, fontSize: 13, fontWeight: 600,
+                  letterSpacing: '0.04em', textTransform: 'uppercase',
+                  cursor: 'pointer',
+                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
+                  WebkitTapHighlightColor: 'transparent',
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                {edited ? 'Cancel' : 'Close'}
+              </button>
+              <button
+                onClick={() => canSave && onSave(text)}
+                disabled={!canSave || (mode === 'view' && !edited)}
+                style={{
+                  all: 'unset',
+                  flex: 1, height: 50, borderRadius: 14,
+                  background: (canSave && (mode === 'edit' || edited))
+                    ? `linear-gradient(180deg, rgba(0,229,255,0.22), rgba(61,127,255,0.14))`
+                    : 'rgba(255,255,255,0.04)',
+                  border: `1px solid ${(canSave && (mode === 'edit' || edited)) ? 'rgba(0,229,255,0.55)' : T.hairlineSoft}`,
+                  color: (canSave && (mode === 'edit' || edited)) ? T.text : T.text3,
+                  fontFamily: T.display, fontSize: 13, fontWeight: 600,
+                  letterSpacing: '0.04em', textTransform: 'uppercase',
+                  cursor: (canSave && (mode === 'edit' || edited)) ? 'pointer' : 'not-allowed',
+                  boxShadow: (canSave && (mode === 'edit' || edited))
+                    ? `0 0 20px rgba(0,229,255,0.22), inset 0 1px 0 rgba(255,255,255,0.05)`
+                    : 'inset 0 1px 0 rgba(255,255,255,0.04)',
+                  opacity: saving ? 0.7 : 1,
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                  WebkitTapHighlightColor: 'transparent',
+                }}
+              >
+                {saving ? (
+                  <>
+                    <svg width="12" height="12" viewBox="0 0 12 12" style={{ animation: 'spin360 800ms linear infinite' }}>
+                      <path d="M10 6a4 4 0 1 1-1.2-2.85M10 1.5V4H7.5" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                    Saving…
+                  </>
+                ) : (
+                  <>
+                    Save
+                    <svg width="12" height="12" viewBox="0 0 12 12">
+                      <path d="M2 6l3 3 5-6" stroke="currentColor" strokeWidth="1.7" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </>
+                )}
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -488,22 +647,30 @@ function MissionInput({ onLaunch, mission, setMission }) {
   const pressedItemRef = useRef(null);
   const justEndedDragRef = useRef(false);
 
-  // Tap-to-action-menu state. selectedItemId: which row's action menu shows.
-  // editingItemId: which row's text is currently being edited inline in the
-  // mission input. Both flow through the bottom CTA region.
+  // selectedItemId: which row's action menu shows (single-tap).
+  // editingItemId: which row's text is in the overlay (action-menu Edit
+  // OR double-tap). overlayStartMode determines whether the overlay
+  // opens in 'view' (double-tap) or 'edit' (action menu) mode.
   const [selectedItemId, setSelectedItemId] = useState(null);
   const [editingItemId, setEditingItemId] = useState(null);
+  const [overlayStartMode, setOverlayStartMode] = useState('edit');
+
+  // Double-tap detection. We delay the single-tap action so a second tap
+  // within ~320ms is recognized as a double-tap instead.
+  const tapTimerRef = useRef(null);
+  const lastTapRef = useRef({ time: 0, id: null });
 
   useEffect(() => { dragRef.current = drag; }, [drag]);
   useEffect(() => { itemsRef.current = items; }, [items]);
 
-  // Cancel any in-flight auto-scroll frame and lingering press timer on unmount.
+  // Cancel any in-flight auto-scroll frame and lingering tap/press timers on unmount.
   useEffect(() => () => {
     if (autoScrollRef.current.rafId) {
       cancelAnimationFrame(autoScrollRef.current.rafId);
       autoScrollRef.current.rafId = null;
     }
     if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
+    if (tapTimerRef.current) clearTimeout(tapTimerRef.current);
   }, []);
 
   // Shake-to-undo / Undo-toast state. pendingUndo holds the most recently
@@ -803,21 +970,53 @@ function MissionInput({ onLaunch, mission, setMission }) {
     onLaunch(text, source || null);
   };
 
-  // Tap on a row toggles the action menu for that item.
+  // Single-tap on a row → toggle the action menu for that item.
   const handleRowTap = (item) => {
     if (justEndedDragRef.current) return;
     if (editingItemId) return; // ignore row taps mid-edit
     setSelectedItemId(prev => prev === item.id ? null : item.id);
   };
 
-  // Action menu: Edit Item
-  // Action menu: Edit Item → opens the overlay
+  // Double-tap on a row → open the overlay in read-only "preview" mode.
+  const handleRowDoubleTap = (item) => {
+    if (justEndedDragRef.current) return;
+    setOverlayStartMode('view');
+    setSelectedItemId(null);
+    setEditingItemId(item.id);
+  };
+
+  // Click dispatcher — distinguishes single tap from double tap. First tap
+  // schedules a delayed single-tap action; a second tap within 320ms cancels
+  // the timer and fires the double-tap action instead.
+  const TAP_DOUBLE_INTERVAL = 320;
+  const handleRowClick = (item) => {
+    if (justEndedDragRef.current) return;
+    const now = Date.now();
+    const last = lastTapRef.current;
+    if (last.id === item.id && (now - last.time) < TAP_DOUBLE_INTERVAL) {
+      if (tapTimerRef.current) {
+        clearTimeout(tapTimerRef.current);
+        tapTimerRef.current = null;
+      }
+      lastTapRef.current = { time: 0, id: null };
+      handleRowDoubleTap(item);
+      return;
+    }
+    lastTapRef.current = { time: now, id: item.id };
+    if (tapTimerRef.current) clearTimeout(tapTimerRef.current);
+    tapTimerRef.current = setTimeout(() => {
+      tapTimerRef.current = null;
+      handleRowTap(item);
+    }, TAP_DOUBLE_INTERVAL);
+  };
+
+  // Action menu Edit Item → open the overlay in editable mode.
   const handleStartEdit = () => {
     const item = items.find(i => i.id === selectedItemId);
     if (!item) return;
+    setOverlayStartMode('edit');
     setEditingItemId(item.id);
     setSelectedItemId(null);
-    // No mission/input state to touch — the overlay manages its own text.
   };
 
   // Action menu: Launch (selected item)
@@ -1307,7 +1506,7 @@ function MissionInput({ onLaunch, mission, setMission }) {
                     ref={el => { if (el) itemRefs.current[item.id] = el; else delete itemRefs.current[item.id]; }}
                     data-item-id={item.id}
                     className={isHighlighted ? 'new-item-highlight' : undefined}
-                    onClick={() => handleRowTap(item)}
+                    onClick={() => handleRowClick(item)}
                     onPointerDown={(e) => handleRowPointerDown(e, item, idx)}
                     onPointerMove={handleRowPointerMove}
                     onPointerUp={handleRowPointerUp}
@@ -1355,9 +1554,10 @@ function MissionInput({ onLaunch, mission, setMission }) {
                         : 'transform 220ms cubic-bezier(0.2,0.8,0.2,1), box-shadow 200ms ease, border-color 200ms ease, background 200ms ease',
                       willChange: isDragging ? 'transform' : 'auto',
                       animationDelay: isHighlighted ? `${highlightDelay}ms` : undefined,
-                      // While idle, allow native vertical scroll; once dragging,
-                      // the captured pointer prevents the browser from hijacking.
-                      touchAction: 'pan-y',
+                      // manipulation = pan + pinch-zoom, but suppresses the
+                      // iOS double-tap-zoom gesture so our double-tap handler
+                      // fires cleanly. Single-finger vertical pan still works.
+                      touchAction: 'manipulation',
                     }}
                   >
                     {/* Priority badge — reflects the item's current rank.
@@ -1488,6 +1688,7 @@ function MissionInput({ onLaunch, mission, setMission }) {
         <EditItemOverlay
           item={items.find(i => i.id === editingItemId)}
           saving={savingItem}
+          startMode={overlayStartMode}
           onCancel={handleCancelEdit}
           onSave={handleSaveEdit}
         />
