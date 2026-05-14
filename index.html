@@ -1317,7 +1317,7 @@ function MissionInput({ onLaunch, mission, setMission }) {
   // Recomputes deltaY (pointer + scroll offset), dropIdx (for between-items
   // drops) and hoverTargetId (for over-item drops → folder creation) for the
   // current pointer Y. Called from pointermove and the auto-scroll frame.
-  const FOLDER_HOVER_MS = 1000;
+  const FOLDER_HOVER_MS = 500;
 
   const updateDragVisuals = (clientY) => {
     const dragNow = dragRef.current;
