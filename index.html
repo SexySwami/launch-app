@@ -839,12 +839,11 @@ function MissionInput({ onLaunch, mission, setMission }) {
   const lastTapRef = useRef({ time: 0, id: null });
 
   // Folder state.
-  // - expandedFolders: Set of folder ids that are currently expanded.
+  // - expansion lives on each folder item as `expanded` (persisted via PUT).
   // - namingFolderId: the folder whose naming overlay is currently shown.
   // - hoverFolderTimerRef + hoverFolderRef: track the 2s drag-hold over an
   //   item that triggers folder creation.
   // - hoverProgress: 0..1, animates the hover ring during the 2s hold.
-  const [expandedFolders, setExpandedFolders] = useState(() => new Set());
   const [namingFolderId, setNamingFolderId] = useState(null);
   const [hoverProgress, setHoverProgress] = useState(0);
   const hoverFolderRef = useRef({ targetId: null, startedAt: 0 });
@@ -1432,6 +1431,7 @@ function MissionInput({ onLaunch, mission, setMission }) {
       type: 'folder',
       name: '',
       createdAt: Date.now(),
+      expanded: true,
       children: [
         { id: target.id, text: target.text, createdAt: target.createdAt || Date.now() },
         { id: dragged.id, text: dragged.text, createdAt: dragged.createdAt || Date.now() },
@@ -1443,7 +1443,6 @@ function MissionInput({ onLaunch, mission, setMission }) {
       .map(i => i.id === targetId ? folder : i);
 
     setItems(next);
-    setExpandedFolders(prev => { const s = new Set(prev); s.add(folderId); return s; });
     setNamingFolderId(folderId);
 
     if (canCallAPI) {
@@ -1485,13 +1484,26 @@ function MissionInput({ onLaunch, mission, setMission }) {
     }
   };
 
-  const toggleFolderExpanded = (id) => {
-    setExpandedFolders(prev => {
-      const s = new Set(prev);
-      if (s.has(id)) s.delete(id);
-      else s.add(id);
-      return s;
-    });
+  const toggleFolderExpanded = async (id) => {
+    const before = items;
+    const updated = items.map(i =>
+      i.id === id && i.type === 'folder' ? { ...i, expanded: !i.expanded } : i
+    );
+    setItems(updated);
+    if (!canCallAPI) return;
+    try {
+      const res = await fetch('/api/queue', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ items: updated }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Failed (${res.status})`);
+      if (Array.isArray(data.items)) setItems(data.items);
+    } catch (err) {
+      setItems(before);
+      setItemsError(err.message || 'Could not save folder state');
+    }
   };
 
   const autoScrollFrame = () => {
@@ -1861,7 +1873,7 @@ function MissionInput({ onLaunch, mission, setMission }) {
 
               // Folder row — different layout from a flat item.
               if (item.type === 'folder') {
-                const expanded = expandedFolders.has(item.id);
+                const expanded = item.expanded === true;
                 const childCount = Array.isArray(item.children) ? item.children.length : 0;
                 const folderName = item.name || 'New Folder';
                 return (
