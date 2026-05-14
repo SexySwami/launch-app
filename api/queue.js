@@ -14,6 +14,14 @@ function creds() {
   return { url, token };
 }
 
+function isLeaf(i) {
+  return i && typeof i.id === 'string' && typeof i.text === 'string';
+}
+
+function isFolder(i) {
+  return i && typeof i.id === 'string' && i.type === 'folder';
+}
+
 async function readQueue() {
   const { url, token } = creds();
   const res = await fetch(`${url}/get/${encodeURIComponent(KEY)}`, {
@@ -26,7 +34,7 @@ async function readQueue() {
   try {
     const parsed = JSON.parse(data.result);
     return Array.isArray(parsed)
-      ? parsed.filter(i => i && typeof i.id === 'string' && typeof i.text === 'string')
+      ? parsed.filter(i => isLeaf(i) || isFolder(i))
       : [];
   } catch {
     return [];
@@ -127,6 +135,7 @@ export default async function handler(request) {
             type: 'folder',
             name: typeof i.name === 'string' ? i.name.toString().slice(0, 200) : '',
             createdAt: Number.isFinite(i.createdAt) ? i.createdAt : Date.now(),
+            expanded: Boolean(i.expanded),
             children: Array.isArray(i.children)
               ? i.children.map(cleanLeaf).filter(Boolean)
               : [],
