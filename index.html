@@ -106,6 +106,15 @@
     0%   { transform: translateX(0) }
     100% { transform: translateX(-50%) }
   }
+  @keyframes folderHoverPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(168,118,255,0.45), 0 0 16px rgba(168,118,255,0.3) }
+    50%      { box-shadow: 0 0 0 4px rgba(168,118,255,0.32), 0 0 28px rgba(168,118,255,0.55) }
+  }
+  @keyframes folderPop {
+    0%   { transform: scale(0.6); opacity: 0 }
+    60%  { transform: scale(1.06); opacity: 1 }
+    100% { transform: scale(1); opacity: 1 }
+  }
 
   /* Hide native input clear/cancel chrome on iOS */
   input::-webkit-search-decoration,
@@ -617,6 +626,175 @@ function EditItemOverlay({ item, saving, onCancel, onSave, startMode = 'edit' })
 }
 
 // ─────────────────────────────────────────────────────────────
+// FolderNamingOverlay — appears right after a folder is auto-created
+// via the 2-second drag-hold gesture. Auto-focuses, Enter saves,
+// Skip leaves the folder named whatever was already there (default '').
+// ─────────────────────────────────────────────────────────────
+function FolderNamingOverlay({ folder, onSkip, onSave }) {
+  const [name, setName] = useState(folder?.name || '');
+  const inRef = useRef(null);
+
+  useEffect(() => { setName(folder?.name || ''); }, [folder?.id]);
+
+  useEffect(() => {
+    const t = setTimeout(() => { inRef.current?.focus(); }, 60);
+    return () => clearTimeout(t);
+  }, []);
+
+  useEffect(() => {
+    const h = (e) => { if (e.key === 'Escape') onSkip(); };
+    document.addEventListener('keydown', h);
+    return () => document.removeEventListener('keydown', h);
+  }, [onSkip]);
+
+  if (!folder) return null;
+  const childCount = Array.isArray(folder.children) ? folder.children.length : 0;
+  const canSave = name.trim().length > 0;
+
+  return (
+    <div
+      onClick={onSkip}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 210,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '20px 16px',
+        background: 'rgba(2,4,8,0.7)',
+        backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
+        animation: 'backdropIn 220ms ease',
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: '100%', maxWidth: 360,
+          background: 'linear-gradient(160deg, rgba(168,118,255,0.16), rgba(255,255,255,0.025) 55%, rgba(168,118,255,0.06))',
+          border: `1px solid rgba(168,118,255,0.6)`,
+          borderRadius: 22,
+          padding: '20px 18px 16px',
+          boxShadow: `
+            0 0 0 1px rgba(255,255,255,0.05) inset,
+            0 30px 80px rgba(0,0,0,0.65),
+            0 0 60px rgba(168,118,255,0.30)
+          `,
+          backdropFilter: 'blur(28px)', WebkitBackdropFilter: 'blur(28px)',
+          animation: 'modalIn 280ms cubic-bezier(0.2,0.8,0.2,1)',
+          position: 'relative',
+        }}
+      >
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+          <div style={{
+            width: 36, height: 36, borderRadius: 10,
+            background: `linear-gradient(180deg, ${T.purple}, rgba(168,118,255,0.6))`,
+            color: '#0e0820',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            boxShadow: `0 0 14px rgba(168,118,255,0.5), inset 0 1px 0 rgba(255,255,255,0.18)`,
+            flexShrink: 0,
+            animation: 'folderPop 380ms cubic-bezier(0.2,0.8,0.2,1)',
+          }}>
+            <svg width="16" height="16" viewBox="0 0 14 14">
+              <path d="M1.5 3.5a1 1 0 0 1 1-1h3l1 1.2h5a1 1 0 0 1 1 1V11a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1V3.5z" fill="currentColor"/>
+            </svg>
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{
+              fontFamily: T.mono, fontSize: 10, letterSpacing: '0.24em',
+              color: T.purple, textTransform: 'uppercase', fontWeight: 600,
+              marginBottom: 2,
+            }}>
+              New Folder
+            </div>
+            <div style={{
+              fontFamily: T.mono, fontSize: 9.5, letterSpacing: '0.18em',
+              color: T.text3, textTransform: 'uppercase',
+            }}>
+              {childCount} {childCount === 1 ? 'item' : 'items'} inside
+            </div>
+          </div>
+        </div>
+
+        {/* Name input */}
+        <input
+          ref={inRef}
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && canSave) {
+              e.preventDefault();
+              onSave(name.trim());
+            }
+          }}
+          placeholder="Name this folder…"
+          maxLength={200}
+          enterKeyHint="done"
+          style={{
+            all: 'unset',
+            display: 'block', boxSizing: 'border-box',
+            width: '100%',
+            fontFamily: T.display, fontSize: 18, fontWeight: 600,
+            color: T.text, letterSpacing: '-0.01em',
+            padding: '12px 14px',
+            background: 'rgba(255,255,255,0.04)',
+            border: `1px solid rgba(168,118,255,0.45)`,
+            borderRadius: 14,
+            boxShadow: '0 0 0 3px rgba(168,118,255,0.10), inset 0 1px 0 rgba(255,255,255,0.04)',
+            marginBottom: 14,
+          }}
+        />
+
+        {/* Buttons */}
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button
+            onClick={onSkip}
+            style={{
+              all: 'unset',
+              flex: 1, height: 48, borderRadius: 14,
+              background: T.surface,
+              border: `1px solid ${T.hairline}`,
+              color: T.text2,
+              fontFamily: T.display, fontSize: 13, fontWeight: 600,
+              letterSpacing: '0.04em', textTransform: 'uppercase',
+              cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              WebkitTapHighlightColor: 'transparent',
+            }}
+          >
+            Skip
+          </button>
+          <button
+            onClick={() => canSave && onSave(name.trim())}
+            disabled={!canSave}
+            style={{
+              all: 'unset',
+              flex: 1, height: 48, borderRadius: 14,
+              background: canSave
+                ? `linear-gradient(180deg, rgba(168,118,255,0.30), rgba(168,118,255,0.16))`
+                : 'rgba(255,255,255,0.04)',
+              border: `1px solid ${canSave ? 'rgba(168,118,255,0.65)' : T.hairlineSoft}`,
+              color: canSave ? T.text : T.text3,
+              fontFamily: T.display, fontSize: 13, fontWeight: 600,
+              letterSpacing: '0.04em', textTransform: 'uppercase',
+              cursor: canSave ? 'pointer' : 'not-allowed',
+              boxShadow: canSave
+                ? `0 0 20px rgba(168,118,255,0.30), inset 0 1px 0 rgba(255,255,255,0.05)`
+                : 'inset 0 1px 0 rgba(255,255,255,0.04)',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              WebkitTapHighlightColor: 'transparent',
+            }}
+          >
+            Name Folder
+            <svg width="12" height="12" viewBox="0 0 12 12">
+              <path d="M2 6l3 3 5-6" stroke="currentColor" strokeWidth="1.7" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 // Screen 1 — Mission Input
 // ─────────────────────────────────────────────────────────────
 function MissionInput({ onLaunch, mission, setMission }) {
@@ -660,6 +838,19 @@ function MissionInput({ onLaunch, mission, setMission }) {
   const tapTimerRef = useRef(null);
   const lastTapRef = useRef({ time: 0, id: null });
 
+  // Folder state.
+  // - expandedFolders: Set of folder ids that are currently expanded.
+  // - namingFolderId: the folder whose naming overlay is currently shown.
+  // - hoverFolderTimerRef + hoverFolderRef: track the 2s drag-hold over an
+  //   item that triggers folder creation.
+  // - hoverProgress: 0..1, animates the hover ring during the 2s hold.
+  const [expandedFolders, setExpandedFolders] = useState(() => new Set());
+  const [namingFolderId, setNamingFolderId] = useState(null);
+  const [hoverProgress, setHoverProgress] = useState(0);
+  const hoverFolderRef = useRef({ targetId: null, startedAt: 0 });
+  const hoverFolderTimerRef = useRef(null);
+  const hoverProgressRafRef = useRef(null);
+
   useEffect(() => { dragRef.current = drag; }, [drag]);
   useEffect(() => { itemsRef.current = items; }, [items]);
 
@@ -671,6 +862,8 @@ function MissionInput({ onLaunch, mission, setMission }) {
     }
     if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
     if (tapTimerRef.current) clearTimeout(tapTimerRef.current);
+    if (hoverFolderTimerRef.current) clearTimeout(hoverFolderTimerRef.current);
+    if (hoverProgressRafRef.current) cancelAnimationFrame(hoverProgressRafRef.current);
   }, []);
 
   // Shake-to-undo / Undo-toast state. pendingUndo holds the most recently
@@ -1122,8 +1315,11 @@ function MissionInput({ onLaunch, mission, setMission }) {
     }
   };
 
-  // Recomputes deltaY (pointer + scroll offset) and dropIdx for the current
-  // pointer Y. Called both from pointermove and from the auto-scroll frame.
+  // Recomputes deltaY (pointer + scroll offset), dropIdx (for between-items
+  // drops) and hoverTargetId (for over-item drops → folder creation) for the
+  // current pointer Y. Called from pointermove and the auto-scroll frame.
+  const FOLDER_HOVER_MS = 2000;
+
   const updateDragVisuals = (clientY) => {
     const dragNow = dragRef.current;
     if (!dragNow) return;
@@ -1131,23 +1327,171 @@ function MissionInput({ onLaunch, mission, setMission }) {
 
     const currentScrollTop = listScrollRef.current?.scrollTop || 0;
     const scrollDelta = currentScrollTop - (dragNow.startScrollTop || 0);
-    // Add scrollDelta so the dragged tile stays under the finger even when
-    // the container scrolls beneath it.
     const deltaY = (clientY - dragNow.startY) + scrollDelta;
 
     const others = itemsNow.filter(i => i.id !== dragNow.id);
+
+    // Hover-over detection: pointer in the middle 50% of a non-dragged top-
+    // level row (and that row is itself a flat item — folders can't merge
+    // with other rows for now).
+    let hoverTargetId = null;
     let dropIdx = others.length;
+    let dropIdxSet = false;
     for (let i = 0; i < others.length; i++) {
-      const node = itemRefs.current[others[i].id];
+      const other = others[i];
+      const node = itemRefs.current[other.id];
       if (!node) continue;
       const rect = node.getBoundingClientRect();
-      const midY = rect.top + rect.height / 2;
-      if (clientY < midY) { dropIdx = i; break; }
+      const relative = (clientY - rect.top) / rect.height;
+      const isFlatItem = !other.type || other.type === 'item';
+      if (relative > 0.25 && relative < 0.75 && isFlatItem) {
+        hoverTargetId = other.id;
+        // Don't pick a dropIdx — the pointer is "inside" this row.
+      }
+      if (!dropIdxSet) {
+        const midY = rect.top + rect.height / 2;
+        if (clientY < midY) { dropIdx = i; dropIdxSet = true; }
+      }
     }
 
-    if (dragNow.deltaY !== deltaY || dragNow.dropIdx !== dropIdx) {
-      setDrag(d => d ? { ...d, deltaY, dropIdx } : d);
+    // Track the hover timer separately. Only restart when the target changes.
+    const prev = hoverFolderRef.current;
+    if (hoverTargetId !== prev.targetId) {
+      if (hoverFolderTimerRef.current) {
+        clearTimeout(hoverFolderTimerRef.current);
+        hoverFolderTimerRef.current = null;
+      }
+      if (hoverProgressRafRef.current) {
+        cancelAnimationFrame(hoverProgressRafRef.current);
+        hoverProgressRafRef.current = null;
+      }
+      if (hoverTargetId) {
+        const startedAt = Date.now();
+        hoverFolderRef.current = { targetId: hoverTargetId, startedAt };
+        const tickProgress = () => {
+          const elapsed = Date.now() - hoverFolderRef.current.startedAt;
+          const p = Math.min(1, elapsed / FOLDER_HOVER_MS);
+          setHoverProgress(p);
+          if (p < 1 && hoverFolderRef.current.targetId === hoverTargetId) {
+            hoverProgressRafRef.current = requestAnimationFrame(tickProgress);
+          }
+        };
+        hoverProgressRafRef.current = requestAnimationFrame(tickProgress);
+        hoverFolderTimerRef.current = setTimeout(() => {
+          hoverFolderTimerRef.current = null;
+          triggerCreateFolder(dragRef.current?.id, hoverTargetId);
+        }, FOLDER_HOVER_MS);
+      } else {
+        hoverFolderRef.current = { targetId: null, startedAt: 0 };
+        setHoverProgress(0);
+      }
     }
+
+    if (
+      dragNow.deltaY !== deltaY ||
+      dragNow.dropIdx !== dropIdx ||
+      dragNow.hoverTargetId !== hoverTargetId
+    ) {
+      setDrag(d => d ? { ...d, deltaY, dropIdx, hoverTargetId } : d);
+    }
+  };
+
+  // Build the folder from the dragged + target items, persist, end drag,
+  // expand the new folder, and open the naming overlay.
+  const triggerCreateFolder = async (draggedId, targetId) => {
+    if (!draggedId || !targetId) return;
+    const dragNow = dragRef.current;
+    if (!dragNow) return;
+    const itemsNow = itemsRef.current;
+    const dragged = itemsNow.find(i => i.id === draggedId);
+    const target = itemsNow.find(i => i.id === targetId);
+    if (!dragged || !target) return;
+    // For now folder creation only works between two flat items.
+    if (dragged.type === 'folder' || target.type === 'folder') return;
+
+    stopAutoScroll();
+    if (hoverFolderTimerRef.current) {
+      clearTimeout(hoverFolderTimerRef.current);
+      hoverFolderTimerRef.current = null;
+    }
+    if (hoverProgressRafRef.current) {
+      cancelAnimationFrame(hoverProgressRafRef.current);
+      hoverProgressRafRef.current = null;
+    }
+    hoverFolderRef.current = { targetId: null, startedAt: 0 };
+    setHoverProgress(0);
+    setDrag(null);
+    justEndedDragRef.current = true;
+    setTimeout(() => { justEndedDragRef.current = false; }, 120);
+
+    const folderId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : `f_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const folder = {
+      id: folderId,
+      type: 'folder',
+      name: '',
+      createdAt: Date.now(),
+      children: [
+        { id: target.id, text: target.text, createdAt: target.createdAt || Date.now() },
+        { id: dragged.id, text: dragged.text, createdAt: dragged.createdAt || Date.now() },
+      ],
+    };
+    // Replace the target with the folder, drop the dragged item.
+    const next = itemsNow
+      .filter(i => i.id !== draggedId)
+      .map(i => i.id === targetId ? folder : i);
+
+    setItems(next);
+    setExpandedFolders(prev => { const s = new Set(prev); s.add(folderId); return s; });
+    setNamingFolderId(folderId);
+
+    if (canCallAPI) {
+      try {
+        const res = await fetch('/api/queue', {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ items: next }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `Failed (${res.status})`);
+        if (Array.isArray(data.items)) setItems(data.items);
+      } catch (err) {
+        setItemsError(err.message || 'Could not create folder');
+      }
+    }
+  };
+
+  // Save the folder's name from the naming overlay.
+  const handleSaveFolderName = async (id, name) => {
+    const updated = items.map(i => i.id === id && i.type === 'folder'
+      ? { ...i, name: (name || '').slice(0, 200) }
+      : i
+    );
+    setItems(updated);
+    setNamingFolderId(null);
+    if (!canCallAPI) return;
+    try {
+      const res = await fetch('/api/queue', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ items: updated }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Failed (${res.status})`);
+      if (Array.isArray(data.items)) setItems(data.items);
+    } catch (err) {
+      setItemsError(err.message || 'Could not save folder name');
+    }
+  };
+
+  const toggleFolderExpanded = (id) => {
+    setExpandedFolders(prev => {
+      const s = new Set(prev);
+      if (s.has(id)) s.delete(id);
+      else s.add(id);
+      return s;
+    });
   };
 
   const autoScrollFrame = () => {
@@ -1220,14 +1564,29 @@ function MissionInput({ onLaunch, mission, setMission }) {
 
   const handleDragEnd = () => {
     stopAutoScroll();
+    // Cancel any in-flight folder-hover timer / progress animation.
+    if (hoverFolderTimerRef.current) {
+      clearTimeout(hoverFolderTimerRef.current);
+      hoverFolderTimerRef.current = null;
+    }
+    if (hoverProgressRafRef.current) {
+      cancelAnimationFrame(hoverProgressRafRef.current);
+      hoverProgressRafRef.current = null;
+    }
+    hoverFolderRef.current = { targetId: null, startedAt: 0 };
+    setHoverProgress(0);
+
     const dragNow = dragRef.current;
     if (!dragNow) return;
-    const { fromIdx, dropIdx } = dragNow;
+    const { fromIdx, dropIdx, hoverTargetId } = dragNow;
     setDrag(null);
     // Suppress the click event that fires after pointerup on the same target,
     // so dropping doesn't accidentally launch the dropped item.
     justEndedDragRef.current = true;
     setTimeout(() => { justEndedDragRef.current = false; }, 120);
+    // If we were hovering over another item but the 2s timer hadn't fired,
+    // pointerup is a "cancel merge" — release without reordering.
+    if (hoverTargetId) return;
     if (fromIdx === dropIdx) return;
     const reordered = [...items];
     const [moved] = reordered.splice(fromIdx, 1);
@@ -1492,12 +1851,178 @@ function MissionInput({ onLaunch, mission, setMission }) {
               const othersIdx = drag && !isDragging
                 ? others.findIndex(i => i.id === item.id)
                 : -1;
-              const showIndicatorBefore = drag && !isDragging && drag.dropIdx === othersIdx;
+              const showIndicatorBefore = drag && !isDragging && drag.dropIdx === othersIdx && drag.hoverTargetId == null;
               const isFirstItem = idx === 0;
               const highlightDelay = highlightedIds.get(item.id);
               const isHighlighted = highlightDelay !== undefined;
               const isSelected = selectedItemId === item.id;
               const isEditing = editingItemId === item.id;
+              const isHoverTarget = drag && drag.hoverTargetId === item.id;
+
+              // Folder row — different layout from a flat item.
+              if (item.type === 'folder') {
+                const expanded = expandedFolders.has(item.id);
+                const childCount = Array.isArray(item.children) ? item.children.length : 0;
+                const folderName = item.name || 'New Folder';
+                return (
+                  <React.Fragment key={item.id}>
+                    {showIndicatorBefore && <DropIndicator />}
+                    <div
+                      ref={el => { if (el) itemRefs.current[item.id] = el; else delete itemRefs.current[item.id]; }}
+                      data-item-id={item.id}
+                      onClick={() => { if (justEndedDragRef.current) return; toggleFolderExpanded(item.id); }}
+                      onPointerDown={(e) => handleRowPointerDown(e, item, idx)}
+                      onPointerMove={handleRowPointerMove}
+                      onPointerUp={handleRowPointerUp}
+                      onPointerCancel={handleRowPointerCancel}
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`Folder ${folderName}, ${childCount} items, ${expanded ? 'expanded' : 'collapsed'}`}
+                      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleFolderExpanded(item.id); } }}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        background: 'linear-gradient(180deg, rgba(168,118,255,0.10), rgba(168,118,255,0.03))',
+                        border: `1px solid rgba(168,118,255,0.4)`,
+                        borderRadius: 14, padding: '4px 4px 4px 4px',
+                        fontFamily: T.display, fontSize: 14, color: T.text,
+                        cursor: isDragging ? 'grabbing' : 'pointer', textAlign: 'left',
+                        WebkitTapHighlightColor: 'transparent',
+                        flexShrink: 0, minHeight: 48,
+                        position: 'relative',
+                        transform: isDragging
+                          ? `translateY(${drag.deltaY}px) scale(1.02)`
+                          : 'none',
+                        zIndex: isDragging ? 10 : 1,
+                        boxShadow: isDragging
+                          ? `0 12px 32px rgba(168,118,255,0.32), 0 0 24px rgba(168,118,255,0.20)`
+                          : `0 0 12px rgba(168,118,255,0.14)`,
+                        opacity: isDragging ? 0.96 : 1,
+                        transition: isDragging
+                          ? 'box-shadow 200ms ease, opacity 200ms ease'
+                          : 'transform 220ms cubic-bezier(0.2,0.8,0.2,1), box-shadow 200ms ease, border-color 200ms ease',
+                        willChange: isDragging ? 'transform' : 'auto',
+                        touchAction: 'manipulation',
+                        animation: highlightDelay === 0 ? 'folderPop 360ms cubic-bezier(0.2,0.8,0.2,1)' : undefined,
+                      }}
+                    >
+                      {/* Folder badge */}
+                      <div
+                        aria-hidden="true"
+                        style={{
+                          flexShrink: 0,
+                          height: 30, minWidth: 30, padding: '0 6px',
+                          boxSizing: 'border-box',
+                          borderRadius: 10,
+                          background: `linear-gradient(180deg, ${T.purple}, rgba(168,118,255,0.6))`,
+                          color: '#0e0820',
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          boxShadow: `0 0 12px rgba(168,118,255,0.45), inset 0 1px 0 rgba(255,255,255,0.18)`,
+                          pointerEvents: 'none',
+                          marginLeft: 4,
+                          transition: 'transform 200ms ease',
+                        }}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 14 14">
+                          <path d="M1.5 3.5a1 1 0 0 1 1-1h3l1 1.2h5a1 1 0 0 1 1 1V11a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1V3.5z" fill="currentColor"/>
+                        </svg>
+                      </div>
+                      {/* Title + count */}
+                      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 1 }}>
+                        <span style={{
+                          fontFamily: T.display, fontSize: 14, fontWeight: 600,
+                          color: item.name ? T.text : T.text2,
+                          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                          letterSpacing: '-0.01em',
+                        }}>{folderName}</span>
+                        <span style={{
+                          fontFamily: T.mono, fontSize: 9, letterSpacing: '0.18em',
+                          color: T.text3, textTransform: 'uppercase',
+                        }}>
+                          {childCount} {childCount === 1 ? 'item' : 'items'}
+                        </span>
+                      </div>
+                      {/* Expand chevron */}
+                      <div
+                        aria-hidden="true"
+                        style={{
+                          flexShrink: 0,
+                          width: 32, height: 32, borderRadius: 99,
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          color: T.text2,
+                          transition: 'transform 200ms ease, color 200ms ease',
+                          transform: expanded ? 'rotate(180deg)' : 'none',
+                        }}
+                      >
+                        <svg width="12" height="12" viewBox="0 0 12 12">
+                          <path d="M3 4.5l3 3 3-3" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                      </div>
+                      {/* Delete (× also removes children for now) */}
+                      <button
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={(e) => { e.stopPropagation(); handleDeleteItem(item.id); }}
+                        aria-label={`Delete folder ${folderName}`}
+                        style={{
+                          all: 'unset', cursor: 'pointer', flexShrink: 0,
+                          width: 32, height: 32, borderRadius: 99,
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          color: T.text3,
+                        }}
+                      >
+                        <svg width="10" height="10" viewBox="0 0 10 10">
+                          <path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                        </svg>
+                      </button>
+                    </div>
+                    {/* Children list — visible when expanded. */}
+                    {expanded && Array.isArray(item.children) && item.children.length > 0 && (
+                      <div style={{
+                        display: 'flex', flexDirection: 'column', gap: 6,
+                        margin: '0 0 0 20px',
+                        paddingLeft: 14,
+                        borderLeft: `1px dashed rgba(168,118,255,0.32)`,
+                        flexShrink: 0,
+                      }}>
+                        {item.children.map((child, ci) => (
+                          <div key={child.id} style={{
+                            display: 'flex', alignItems: 'center', gap: 8,
+                            background: 'rgba(255,255,255,0.02)',
+                            border: `1px solid ${T.hairlineSoft}`,
+                            borderRadius: 12, padding: '8px 10px',
+                            fontFamily: T.display, fontSize: 13, color: T.text2,
+                            flexShrink: 0,
+                          }}>
+                            <span style={{
+                              width: 6, height: 6, borderRadius: 1,
+                              background: T.purple, opacity: 0.6, flexShrink: 0,
+                            }} />
+                            <span style={{
+                              flex: 1, minWidth: 0,
+                              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                            }}>{child.text}</span>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleLaunchItem(child.text, null); }}
+                              aria-label={`Launch ${child.text}`}
+                              style={{
+                                all: 'unset', cursor: 'pointer', flexShrink: 0,
+                                width: 28, height: 28, borderRadius: 99,
+                                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                color: T.cyan,
+                                background: 'rgba(0,229,255,0.10)',
+                                border: '1px solid rgba(0,229,255,0.32)',
+                              }}
+                            >
+                              <svg width="12" height="12" viewBox="0 0 13 13">
+                                <path d="M2 6.5l3 3 6-7" stroke="currentColor" strokeWidth="1.7" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                              </svg>
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </React.Fragment>
+                );
+              }
 
               return (
                 <React.Fragment key={item.id}>
@@ -1516,15 +2041,18 @@ function MissionInput({ onLaunch, mission, setMission }) {
                     onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleRowTap(item); } }}
                     style={{
                       display: 'flex', alignItems: 'center', gap: 8,
-                      background: isSelected
-                        ? 'linear-gradient(180deg, rgba(0,229,255,0.14), rgba(0,229,255,0.04))'
-                        : isEditing
-                          ? 'linear-gradient(180deg, rgba(168,118,255,0.14), rgba(168,118,255,0.04))'
-                          : isFirstItem
-                            ? 'linear-gradient(180deg, rgba(0,229,255,0.07), rgba(255,255,255,0.025))'
-                            : 'rgba(255,255,255,0.025)',
+                      background: isHoverTarget
+                        ? 'linear-gradient(180deg, rgba(168,118,255,0.22), rgba(168,118,255,0.08))'
+                        : isSelected
+                          ? 'linear-gradient(180deg, rgba(0,229,255,0.14), rgba(0,229,255,0.04))'
+                          : isEditing
+                            ? 'linear-gradient(180deg, rgba(168,118,255,0.14), rgba(168,118,255,0.04))'
+                            : isFirstItem
+                              ? 'linear-gradient(180deg, rgba(0,229,255,0.07), rgba(255,255,255,0.025))'
+                              : 'rgba(255,255,255,0.025)',
                       border: `1px solid ${
-                        isSelected ? 'rgba(0,229,255,0.6)'
+                        isHoverTarget ? 'rgba(168,118,255,0.7)'
+                        : isSelected ? 'rgba(0,229,255,0.6)'
                         : isEditing ? 'rgba(168,118,255,0.55)'
                         : isFirstItem ? 'rgba(0,229,255,0.32)'
                         : T.hairlineSoft
@@ -1537,22 +2065,24 @@ function MissionInput({ onLaunch, mission, setMission }) {
                       position: 'relative',
                       transform: isDragging
                         ? `translateY(${drag.deltaY}px) scale(1.02)`
-                        : 'none',
+                        : isHoverTarget ? `scale(${1 + hoverProgress * 0.025})` : 'none',
                       zIndex: isDragging ? 10 : 1,
                       boxShadow: isDragging
                         ? `0 12px 32px rgba(0,229,255,0.32), 0 0 24px rgba(0,229,255,0.20)`
-                        : isSelected
-                          ? `0 0 18px rgba(0,229,255,0.30)`
-                          : isEditing
-                            ? `0 0 18px rgba(168,118,255,0.30)`
-                            : isFirstItem
-                              ? `0 0 12px rgba(0,229,255,0.10)`
-                              : 'none',
+                        : isHoverTarget
+                          ? `0 0 0 ${2 + hoverProgress * 4}px rgba(168,118,255,${0.18 + hoverProgress * 0.32}), 0 0 ${20 + hoverProgress * 20}px rgba(168,118,255,${0.25 + hoverProgress * 0.35})`
+                          : isSelected
+                            ? `0 0 18px rgba(0,229,255,0.30)`
+                            : isEditing
+                              ? `0 0 18px rgba(168,118,255,0.30)`
+                              : isFirstItem
+                                ? `0 0 12px rgba(0,229,255,0.10)`
+                                : 'none',
                       opacity: isDragging ? 0.96 : 1,
                       transition: isDragging
                         ? 'box-shadow 200ms ease, opacity 200ms ease'
-                        : 'transform 220ms cubic-bezier(0.2,0.8,0.2,1), box-shadow 200ms ease, border-color 200ms ease, background 200ms ease',
-                      willChange: isDragging ? 'transform' : 'auto',
+                        : 'transform 220ms cubic-bezier(0.2,0.8,0.2,1), box-shadow 120ms ease, border-color 200ms ease, background 200ms ease',
+                      willChange: isDragging || isHoverTarget ? 'transform' : 'auto',
                       animationDelay: isHighlighted ? `${highlightDelay}ms` : undefined,
                       // manipulation = pan + pinch-zoom, but suppresses the
                       // iOS double-tap-zoom gesture so our double-tap handler
@@ -1691,6 +2221,14 @@ function MissionInput({ onLaunch, mission, setMission }) {
           startMode={overlayStartMode}
           onCancel={handleCancelEdit}
           onSave={handleSaveEdit}
+        />
+      )}
+
+      {namingFolderId && (
+        <FolderNamingOverlay
+          folder={items.find(i => i.id === namingFolderId)}
+          onSkip={() => setNamingFolderId(null)}
+          onSave={(name) => handleSaveFolderName(namingFolderId, name)}
         />
       )}
 

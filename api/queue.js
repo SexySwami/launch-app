@@ -108,15 +108,33 @@ export default async function handler(request) {
       const incoming = Array.isArray(body?.items) ? body.items : null;
       if (!incoming) return json({ error: 'Missing items array' }, 400);
 
-      // Preserve only the fields we own; trust ids and text from client
-      // since no auth/multi-user means clients are the source of truth here.
-      const cleaned = incoming
-        .filter(i => i && typeof i.id === 'string' && typeof i.text === 'string')
-        .map(i => ({
+      // Entries are either flat items {id, text, createdAt} OR folders
+      // {id, type:'folder', name, children:[items], createdAt}. Folders can
+      // contain only flat items (no nested folders, at least for now).
+      const cleanLeaf = (i) => {
+        if (!i || typeof i.id !== 'string' || typeof i.text !== 'string') return null;
+        return {
           id: i.id,
           text: i.text.toString().slice(0, 500),
           createdAt: Number.isFinite(i.createdAt) ? i.createdAt : Date.now(),
-        }));
+        };
+      };
+      const cleanEntry = (i) => {
+        if (!i || typeof i.id !== 'string') return null;
+        if (i.type === 'folder') {
+          return {
+            id: i.id,
+            type: 'folder',
+            name: typeof i.name === 'string' ? i.name.toString().slice(0, 200) : '',
+            createdAt: Number.isFinite(i.createdAt) ? i.createdAt : Date.now(),
+            children: Array.isArray(i.children)
+              ? i.children.map(cleanLeaf).filter(Boolean)
+              : [],
+          };
+        }
+        return cleanLeaf(i);
+      };
+      const cleaned = incoming.map(cleanEntry).filter(Boolean);
 
       await writeQueue(cleaned);
       return json({ items: cleaned }, 200);
