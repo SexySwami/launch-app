@@ -3,37 +3,7 @@
 
 export const config = { runtime: 'edge' };
 
-const SYSTEM_PROMPT = `You're a coach helping someone with ADHD start a task. Take their mission and break it into EXACTLY 4 micro-steps that move them from "stuck" to "in flow."
-
-The 4 phases run in this order:
-1. OPEN — setup. Get tools/files/inbox/doc ready. No real work yet.
-2. SCAN — orient. Read or review without changing anything.
-3. EXEC — the actual doing. The smallest meaningful forward motion.
-4. PUSH — finalize. Save, send, archive, lock progress in.
-
-For physical/workout missions you may swap one or more phase tags:
-- GEAR (in place of OPEN) — get clothes/equipment ready
-- HYDR (in place of SCAN) — water, fuel, light intake
-- WARM (in place of part of EXEC) — short warm-up
-
-Each step must have:
-- tag: 3–4 letter UPPERCASE code from the list above (OPEN/SCAN/EXEC/PUSH/GEAR/HYDR/WARM).
-- title: 2–7 words, action-verb-led headline. Tiny, concrete, immediately doable. The smallest possible thing for that phase. Specific to the mission.
-- hint: 4–10 words. A reassuring, ADHD-friendly micro-instruction in the same voice as: "Just open it. That's it.", "Skim — don't fix anything yet.", "One sentence is enough.", "Trust the draft.", "Cmd+S. Lock it in.", "You're already there."
-- reward: integer 1–5. The four rewards must SUM TO EXACTLY 15. Use 4-4-4-3 unless a different split fits better.
-
-Hard rules:
-- Avoid generic phrases like "just start", "begin work", "get focused", "make progress".
-- Each title must be different from the others — three angles on doing, not three rewordings.
-- Tailor every step to the user's specific mission text — names, files, deadlines, and entities they mentioned should appear when relevant.
-
-Output JSON ONLY, no preamble or explanation:
-{"steps":[
-  {"tag":"OPEN","title":"...","hint":"...","reward":4},
-  {"tag":"SCAN","title":"...","hint":"...","reward":4},
-  {"tag":"EXEC","title":"...","hint":"...","reward":4},
-  {"tag":"PUSH","title":"...","hint":"...","reward":3}
-]}`;
+const SYSTEM_PROMPT = `You are an expert task planner. The user will provide a task title and an optional description with additional context. Use both to generate exactly four highly specific, accurate, and actionable micro steps that will help the user complete this task. Return only a JSON array of four objects each with a title and description field. No explanation, no markdown.`;
 
 export default async function handler(request) {
   if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
@@ -51,6 +21,11 @@ export default async function handler(request) {
 
   const mission = (body?.mission || '').toString().trim();
   if (!mission) return json({ error: 'Missing mission' }, 400);
+  const description = typeof body?.description === 'string' ? body.description.trim() : '';
+
+  const userContent = description
+    ? `Task: "${mission}"\n\nDescription: "${description}"`
+    : `Task: "${mission}"`;
 
   let upstream;
   try {
@@ -65,7 +40,7 @@ export default async function handler(request) {
         model: 'claude-sonnet-4-6',
         max_tokens: 600,
         system: SYSTEM_PROMPT,
-        messages: [{ role: 'user', content: `Mission: "${mission}"` }],
+        messages: [{ role: 'user', content: userContent }],
       }),
     });
   } catch (err) {
@@ -78,23 +53,27 @@ export default async function handler(request) {
   }
 
   const text = data?.content?.[0]?.text || '';
-  const match = text.match(/\{[\s\S]*\}/);
+  const match = text.match(/\[[\s\S]*\]/) || text.match(/\{[\s\S]*\}/);
   if (!match) return json({ error: 'Could not parse model response', raw: text }, 502);
 
   let parsed;
   try { parsed = JSON.parse(match[0]); }
   catch { return json({ error: 'Invalid JSON from model', raw: text }, 502); }
 
-  const raw = Array.isArray(parsed.steps) ? parsed.steps : [];
+  const raw = Array.isArray(parsed) ? parsed
+    : Array.isArray(parsed?.steps) ? parsed.steps : [];
   if (raw.length !== 4) {
     return json({ error: `Expected 4 steps, got ${raw.length}`, raw: text }, 502);
   }
 
-  const steps = raw.map(s => ({
-    tag: typeof s?.tag === 'string' ? s.tag.toUpperCase().trim().slice(0, 4) : 'STEP',
+  const DEFAULT_TAGS = ['OPEN', 'SCAN', 'EXEC', 'PUSH'];
+  const DEFAULT_REWARDS = [4, 4, 4, 3];
+  const steps = raw.map((s, i) => ({
+    tag: typeof s?.tag === 'string' ? s.tag.toUpperCase().trim().slice(0, 4) : DEFAULT_TAGS[i],
     title: typeof s?.title === 'string' ? s.title.trim() : '',
-    hint: typeof s?.hint === 'string' ? s.hint.trim() : '',
-    reward: Number.isFinite(s?.reward) ? Math.max(1, Math.min(6, Math.round(s.reward))) : 4,
+    hint: typeof s?.hint === 'string' ? s.hint.trim()
+      : typeof s?.description === 'string' ? s.description.trim() : '',
+    reward: Number.isFinite(s?.reward) ? Math.max(1, Math.min(6, Math.round(s.reward))) : DEFAULT_REWARDS[i],
   }));
 
   if (steps.some(s => !s.title)) {

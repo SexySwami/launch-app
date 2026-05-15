@@ -291,10 +291,13 @@ function DropIndicator() {
 // ─────────────────────────────────────────────────────────────
 function EditItemOverlay({ item, saving, onCancel, onSave, startMode = 'edit' }) {
   const [text, setText] = useState(item?.text || '');
+  const [description, setDescription] = useState(item?.description || '');
+  const [descShown, setDescShown] = useState(!!(item?.description));
   const [mode, setMode] = useState(startMode);
   const [edited, setEdited] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const taRef = useRef(null);
+  const descRef = useRef(null);
 
   // Auto-resize the textarea like the rest of the app's auto-resize inputs.
   const autoResize = (el) => {
@@ -308,13 +311,18 @@ function EditItemOverlay({ item, saving, onCancel, onSave, startMode = 'edit' })
   // Resync when the editing target changes.
   useEffect(() => {
     setText(item?.text || '');
+    setDescription(item?.description || '');
+    setDescShown(!!(item?.description));
     setMode(startMode);
     setEdited(false);
     setConfirming(false);
   }, [item?.id, startMode]);
 
   // Auto-resize on text or mode change.
-  useEffect(() => { autoResize(taRef.current); }, [text, mode, confirming]);
+  useEffect(() => {
+    autoResize(taRef.current);
+    autoResize(descRef.current);
+  }, [text, description, mode, confirming, descShown]);
 
   // Initial focus only when starting in edit mode (action-menu entry).
   useEffect(() => {
@@ -417,7 +425,7 @@ function EditItemOverlay({ item, saving, onCancel, onSave, startMode = 'edit' })
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <button
-                onClick={() => onSave(text)}
+                onClick={() => onSave(text, description)}
                 disabled={!canSave}
                 style={{
                   all: 'unset',
@@ -529,7 +537,7 @@ function EditItemOverlay({ item, saving, onCancel, onSave, startMode = 'edit' })
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey && text.trim()) {
                   e.preventDefault();
-                  onSave(text);
+                  onSave(text, description);
                 }
               }}
               placeholder="Item text…"
@@ -559,6 +567,58 @@ function EditItemOverlay({ item, saving, onCancel, onSave, startMode = 'edit' })
               }}
             />
 
+            {/* Description field / toggle */}
+            {descShown ? (
+              <textarea
+                ref={descRef}
+                className="scroll-thin"
+                value={description}
+                onChange={(e) => { setDescription(e.target.value); setEdited(true); }}
+                placeholder="Add context, background, or details…"
+                rows={1}
+                style={{
+                  all: 'unset',
+                  display: 'block', boxSizing: 'border-box',
+                  width: '100%',
+                  fontFamily: T.display, fontSize: 14, fontWeight: 400,
+                  color: T.text2, letterSpacing: '-0.003em',
+                  lineHeight: 1.45,
+                  padding: '10px 14px',
+                  minHeight: 44, maxHeight: 200,
+                  resize: 'none',
+                  whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                  background: 'rgba(168,118,255,0.04)',
+                  border: `1px solid rgba(168,118,255,0.28)`,
+                  borderRadius: 12,
+                  overflowY: 'hidden',
+                  marginBottom: 12,
+                  cursor: 'auto',
+                  transition: 'border-color 200ms ease',
+                }}
+              />
+            ) : (
+              <button
+                onClick={() => setDescShown(true)}
+                style={{
+                  all: 'unset', cursor: 'pointer',
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  marginBottom: 12,
+                  padding: '7px 12px', borderRadius: 10,
+                  background: 'rgba(168,118,255,0.07)',
+                  border: `1px solid rgba(168,118,255,0.25)`,
+                  color: T.purple,
+                  fontFamily: T.mono, fontSize: 10, fontWeight: 600,
+                  letterSpacing: '0.18em', textTransform: 'uppercase',
+                  WebkitTapHighlightColor: 'transparent',
+                }}
+              >
+                <svg width="11" height="11" viewBox="0 0 11 11" style={{ flexShrink: 0 }}>
+                  <path d="M5.5 2v7M2 5.5h7" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round"/>
+                </svg>
+                Description
+              </button>
+            )}
+
             {/* Bottom buttons */}
             <div style={{ display: 'flex', gap: 10 }}>
               <button
@@ -580,7 +640,7 @@ function EditItemOverlay({ item, saving, onCancel, onSave, startMode = 'edit' })
                 {edited ? 'Cancel' : 'Close'}
               </button>
               <button
-                onClick={() => canSave && onSave(text)}
+                onClick={() => canSave && onSave(text, description)}
                 disabled={!canSave || (mode === 'view' && !edited)}
                 style={{
                   all: 'unset',
@@ -1154,12 +1214,12 @@ function MissionInput({ onLaunch, mission, setMission }) {
 
   // `source` (optional): { id, index } of the queue item this launch came from.
   // null/undefined for launches via the freeform input.
-  const handleLaunchItem = (text, source) => {
+  const handleLaunchItem = (text, source, description) => {
     if (drag) return; // ignore taps mid-drag
     setSelectedItemId(null);
     setEditingItemId(null);
     setMission(text);
-    onLaunch(text, source || null);
+    onLaunch(text, source || null, description || null);
   };
 
   // Single-tap on a row → toggle the action menu for that item.
@@ -1216,7 +1276,7 @@ function MissionInput({ onLaunch, mission, setMission }) {
     const idx = items.findIndex(i => i.id === selectedItemId);
     const item = items[idx];
     if (!item) return;
-    handleLaunchItem(item.text, { id: item.id, index: idx });
+    handleLaunchItem(item.text, { id: item.id, index: idx }, item.description);
   };
 
   // Edit overlay: Cancel
@@ -1224,14 +1284,21 @@ function MissionInput({ onLaunch, mission, setMission }) {
     setEditingItemId(null);
   };
 
-  // Edit overlay: Save (overlay passes the new text)
-  const handleSaveEdit = async (newText) => {
+  // Edit overlay: Save (overlay passes the new text and optional description)
+  const handleSaveEdit = async (newText, newDescription) => {
     const text = (newText || '').trim();
     const id = editingItemId;
     if (!text || !id) return;
 
     setSavingItem(true);
-    const updated = items.map(i => i.id === id ? { ...i, text } : i);
+    const desc = typeof newDescription === 'string' ? newDescription.trim() : '';
+    const updated = items.map(i => {
+      if (i.id !== id) return i;
+      const next = { ...i, text };
+      if (desc) next.description = desc;
+      else delete next.description;
+      return next;
+    });
     setItems(updated);
     setEditingItemId(null);
 
@@ -1280,7 +1347,7 @@ function MissionInput({ onLaunch, mission, setMission }) {
   const handleLazyLaunch = () => {
     if (items.length === 0 || drag) return;
     const first = items[0];
-    handleLaunchItem(first.text, { id: first.id, index: 0 });
+    handleLaunchItem(first.text, { id: first.id, index: 0 }, first.description);
   };
 
   const reorderItems = async (newOrder) => {
@@ -2013,7 +2080,7 @@ function MissionInput({ onLaunch, mission, setMission }) {
                               whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                             }}>{child.text}</span>
                             <button
-                              onClick={(e) => { e.stopPropagation(); handleLaunchItem(child.text, null); }}
+                              onClick={(e) => { e.stopPropagation(); handleLaunchItem(child.text, null, child.description); }}
                               aria-label={`Launch ${child.text}`}
                               style={{
                                 all: 'unset', cursor: 'pointer', flexShrink: 0,
@@ -2141,7 +2208,7 @@ function MissionInput({ onLaunch, mission, setMission }) {
                     {/* Direct-launch checkmark — bypasses the action menu */}
                     <button
                       onPointerDown={(e) => e.stopPropagation()}
-                      onClick={(e) => { e.stopPropagation(); handleLaunchItem(item.text, { id: item.id, index: idx }); }}
+                      onClick={(e) => { e.stopPropagation(); handleLaunchItem(item.text, { id: item.id, index: idx }, item.description); }}
                       aria-label={`Launch ${item.text}`}
                       style={{
                         all: 'unset', cursor: 'pointer', flexShrink: 0,
@@ -4392,7 +4459,7 @@ function LaunchApp() {
   // keyword logic if the API is unreachable or errors.
   // `source` (optional): { id, index } of the originating queue item, so we
   // can remove it from the queue on completion and restore later if needed.
-  const launchMission = async (missionText, source) => {
+  const launchMission = async (missionText, source, description) => {
     const m = (missionText || '').trim();
     if (!m) return;
     setMission(m);
@@ -4416,7 +4483,7 @@ function LaunchApp() {
       const res = await fetch('/api/generate-steps', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ mission: m }),
+        body: JSON.stringify({ mission: m, ...(description ? { description: description.toString().trim() } : {}) }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !Array.isArray(data.steps) || data.steps.length === 0) {
