@@ -121,11 +121,15 @@ export default async function handler(request) {
       // contain only flat items (no nested folders, at least for now).
       const cleanLeaf = (i) => {
         if (!i || typeof i.id !== 'string' || typeof i.text !== 'string') return null;
-        return {
+        const leaf = {
           id: i.id,
           text: i.text.toString().slice(0, 500),
           createdAt: Number.isFinite(i.createdAt) ? i.createdAt : Date.now(),
         };
+        if (typeof i.description === 'string' && i.description) {
+          leaf.description = i.description.slice(0, 2000);
+        }
+        return leaf;
       };
       const cleanEntry = (i) => {
         if (!i || typeof i.id !== 'string') return null;
