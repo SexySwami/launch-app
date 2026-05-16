@@ -21,7 +21,21 @@
 export const config = { runtime: 'edge' };
 
 const COMPLETED_KEY = 'launch:completed';
-const QUEUE_KEY = 'launch:queue';
+const QUEUE_LEGACY_KEY = 'launch:queue';
+const VALID_FOLDERS = new Set(['work', 'personal', 'health']);
+
+function normalizeFolder(f) {
+  const v = (f || '').toString().toLowerCase();
+  if (!v || !VALID_FOLDERS.has(v)) return 'work';
+  return v;
+}
+
+function queueKeyFor(folder) {
+  const f = normalizeFolder(folder);
+  // Mirror queue.js: Work uses both `launch:queue:work` and the legacy
+  // `launch:queue` key (the legacy mirror is updated below on write).
+  return `${QUEUE_LEGACY_KEY}:${f}`;
+}
 
 function creds() {
   const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
@@ -70,6 +84,7 @@ function publicShape(entry) {
     id: entry.id,
     sourceItemId: entry.sourceItemId || null,
     sourceItemIndex: typeof entry.sourceItemIndex === 'number' ? entry.sourceItemIndex : null,
+    folderId: normalizeFolder(entry.folderId),
     text: entry.text || '',
     microSteps: Array.isArray(entry.microSteps) ? entry.microSteps : [],
     createdAt: entry.createdAt || 0,
@@ -115,6 +130,7 @@ export default async function handler(request) {
             id,
             sourceItemId: body?.sourceItemId || null,
             sourceItemIndex: typeof body?.sourceItemIndex === 'number' ? body.sourceItemIndex : null,
+            folderId: normalizeFolder(body?.folderId),
             text: (body?.text || '').toString().slice(0, 500),
             microSteps: [],
             createdAt: Date.now(),
@@ -126,6 +142,7 @@ export default async function handler(request) {
           if (body?.text) entry.text = body.text.toString().slice(0, 500);
           if (body?.sourceItemId) entry.sourceItemId = body.sourceItemId;
           if (typeof body?.sourceItemIndex === 'number') entry.sourceItemIndex = body.sourceItemIndex;
+          if (body?.folderId) entry.folderId = normalizeFolder(body.folderId);
         }
 
         if (action === 'log-step') {
@@ -153,7 +170,9 @@ export default async function handler(request) {
         const entry = completed.find(e => e.id === id);
         const updatedCompleted = completed.filter(e => e.id !== id);
 
-        let updatedQueue = await readKey(QUEUE_KEY);
+        const targetFolder = normalizeFolder(entry?.folderId);
+        const queueKey = queueKeyFor(targetFolder);
+        let updatedQueue = await readKey(queueKey);
         if (entry) {
           const newItem = {
             id: newId(),
@@ -169,7 +188,11 @@ export default async function handler(request) {
             newItem,
             ...updatedQueue.slice(insertAt),
           ];
-          await writeKey(QUEUE_KEY, updatedQueue);
+          await writeKey(queueKey, updatedQueue);
+          // Mirror Work writes to the legacy key so any legacy reader stays in sync.
+          if (targetFolder === 'work') {
+            try { await writeKey(QUEUE_LEGACY_KEY, updatedQueue); } catch {}
+          }
         }
 
         await writeKey(COMPLETED_KEY, updatedCompleted);
@@ -177,6 +200,7 @@ export default async function handler(request) {
           restored: entry ? publicShape(entry) : null,
           items: finalizedSorted(updatedCompleted),
           queueItems: updatedQueue,
+          folderId: targetFolder,
         }, 200);
       }
 

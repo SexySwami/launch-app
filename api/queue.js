@@ -6,7 +6,23 @@
 
 export const config = { runtime: 'edge' };
 
-const KEY = 'launch:queue';
+const LEGACY_KEY = 'launch:queue';
+const VALID_FOLDERS = new Set(['work', 'personal', 'health']);
+
+// Resolve the Redis key for a given folder. Work doubles as the legacy default
+// so the user's existing data is reachable both ways during/after migration.
+function keyFor(folder) {
+  if (!folder || folder === 'work') return `${LEGACY_KEY}:work`;
+  return `${LEGACY_KEY}:${folder}`;
+}
+
+function folderParam(request) {
+  const u = new URL(request.url);
+  const f = (u.searchParams.get('folder') || '').toLowerCase();
+  if (!f) return 'work';
+  if (!VALID_FOLDERS.has(f)) return 'work';
+  return f;
+}
 
 function creds() {
   const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
@@ -22,28 +38,26 @@ function isFolder(i) {
   return i && typeof i.id === 'string' && i.type === 'folder';
 }
 
-async function readQueue() {
+async function readKeyRaw(key) {
   const { url, token } = creds();
-  const res = await fetch(`${url}/get/${encodeURIComponent(KEY)}`, {
+  const res = await fetch(`${url}/get/${encodeURIComponent(key)}`, {
     headers: { Authorization: `Bearer ${token}` },
     cache: 'no-store',
   });
   if (!res.ok) throw new Error(`Read failed (${res.status})`);
   const data = await res.json();
-  if (!data?.result) return [];
+  if (!data?.result) return null;
   try {
     const parsed = JSON.parse(data.result);
-    return Array.isArray(parsed)
-      ? parsed.filter(i => isLeaf(i) || isFolder(i))
-      : [];
+    return Array.isArray(parsed) ? parsed.filter(i => isLeaf(i) || isFolder(i)) : [];
   } catch {
     return [];
   }
 }
 
-async function writeQueue(items) {
+async function writeKeyRaw(key, items) {
   const { url, token } = creds();
-  const res = await fetch(`${url}/set/${encodeURIComponent(KEY)}`, {
+  const res = await fetch(`${url}/set/${encodeURIComponent(key)}`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -54,6 +68,33 @@ async function writeQueue(items) {
   if (!res.ok) {
     const body = await res.text().catch(() => '');
     throw new Error(`Write failed (${res.status}): ${body}`);
+  }
+}
+
+// Read a folder's queue. For Work, lazy-migrate from the pre-folder
+// `launch:queue` key if the new `launch:queue:work` key is empty/unset —
+// this preserves the user's existing checklist on first load.
+async function readQueue(folder) {
+  const key = keyFor(folder);
+  const items = await readKeyRaw(key);
+  if (items !== null) return items;
+  if (folder === 'work') {
+    const legacy = await readKeyRaw(LEGACY_KEY);
+    if (legacy && legacy.length > 0) {
+      await writeKeyRaw(key, legacy); // one-shot migration
+      return legacy;
+    }
+  }
+  return [];
+}
+
+async function writeQueue(folder, items) {
+  await writeKeyRaw(keyFor(folder), items);
+  // Keep the legacy key in lockstep with Work so any code path still
+  // reading `launch:queue` (e.g. the completed.js restore action) keeps
+  // working until everything is migrated.
+  if (folder === 'work') {
+    try { await writeKeyRaw(LEGACY_KEY, items); } catch {}
   }
 }
 
@@ -71,9 +112,11 @@ export default async function handler(request) {
     }, 500);
   }
 
+  const folder = folderParam(request);
+
   try {
     if (request.method === 'GET') {
-      const items = await readQueue();
+      const items = await readQueue(folder);
       return json({ items }, 200);
     }
 
@@ -100,14 +143,14 @@ export default async function handler(request) {
         return json({ error: 'A task is too long (500 char max each)' }, 400);
       }
 
-      const items = await readQueue();
+      const items = await readQueue(folder);
       const added = texts.map(t => ({
         id: newId(),
         text: t,
         createdAt: Date.now(),
       }));
       const updated = append ? [...items, ...added] : [...added, ...items];
-      await writeQueue(updated);
+      await writeQueue(folder, updated);
       return json({ items: updated, added }, 200);
     }
 
@@ -149,7 +192,7 @@ export default async function handler(request) {
       };
       const cleaned = incoming.map(cleanEntry).filter(Boolean);
 
-      await writeQueue(cleaned);
+      await writeQueue(folder, cleaned);
       return json({ items: cleaned }, 200);
     }
 
@@ -158,9 +201,9 @@ export default async function handler(request) {
       const id = u.searchParams.get('id');
       if (!id) return json({ error: 'Missing id query param' }, 400);
 
-      const items = await readQueue();
+      const items = await readQueue(folder);
       const updated = items.filter(item => item.id !== id);
-      await writeQueue(updated);
+      await writeQueue(folder, updated);
       return json({ items: updated }, 200);
     }
 
