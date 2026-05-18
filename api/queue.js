@@ -7,7 +7,7 @@
 export const config = { runtime: 'edge' };
 
 const LEGACY_KEY = 'launch:queue';
-const VALID_FOLDERS = new Set(['work', 'personal', 'health']);
+const VALID_FOLDERS = new Set(['work', 'personal', 'health', 'dailies']);
 
 // Resolve the Redis key for a given folder. Work doubles as the legacy default
 // so the user's existing data is reachable both ways during/after migration.

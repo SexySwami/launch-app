@@ -22,7 +22,7 @@ export const config = { runtime: 'edge' };
 
 const COMPLETED_KEY = 'launch:completed';
 const QUEUE_LEGACY_KEY = 'launch:queue';
-const VALID_FOLDERS = new Set(['work', 'personal', 'health']);
+const VALID_FOLDERS = new Set(['work', 'personal', 'health', 'dailies']);
 
 function normalizeFolder(f) {
   const v = (f || '').toString().toLowerCase();
