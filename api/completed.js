@@ -86,6 +86,7 @@ function publicShape(entry) {
     sourceItemIndex: typeof entry.sourceItemIndex === 'number' ? entry.sourceItemIndex : null,
     folderId: normalizeFolder(entry.folderId),
     text: entry.text || '',
+    description: typeof entry.description === 'string' ? entry.description : null,
     microSteps: Array.isArray(entry.microSteps) ? entry.microSteps : [],
     createdAt: entry.createdAt || 0,
     completedAt: entry.completedAt || null,
@@ -132,6 +133,7 @@ export default async function handler(request) {
             sourceItemIndex: typeof body?.sourceItemIndex === 'number' ? body.sourceItemIndex : null,
             folderId: normalizeFolder(body?.folderId),
             text: (body?.text || '').toString().slice(0, 500),
+            description: typeof body?.description === 'string' ? body.description.slice(0, 2000) : null,
             microSteps: [],
             createdAt: Date.now(),
             completedAt: null,
@@ -143,6 +145,7 @@ export default async function handler(request) {
           if (body?.sourceItemId) entry.sourceItemId = body.sourceItemId;
           if (typeof body?.sourceItemIndex === 'number') entry.sourceItemIndex = body.sourceItemIndex;
           if (body?.folderId) entry.folderId = normalizeFolder(body.folderId);
+          if (body?.description !== undefined) entry.description = typeof body.description === 'string' ? body.description.slice(0, 2000) : null;
         }
 
         if (action === 'log-step') {
@@ -178,6 +181,7 @@ export default async function handler(request) {
             id: newId(),
             text: entry.text || '',
             createdAt: Date.now(),
+            ...(typeof entry.description === 'string' && entry.description ? { description: entry.description } : {}),
           };
           const insertAt = Math.max(0, Math.min(
             typeof entry.sourceItemIndex === 'number' ? entry.sourceItemIndex : updatedQueue.length,
