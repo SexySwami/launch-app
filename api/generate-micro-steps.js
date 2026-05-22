@@ -38,7 +38,11 @@ Follow ALL of these rules:
    action steps that advance the task.
 
 Return only a JSON array of exactly 4 objects each with a title and
-description field. No explanation, no markdown, no bullet points.`;
+description field following these strict length rules:
+- Title: maximum 5 to 6 words. Short, punchy, and action-based.
+- Description: maximum 10 to 12 words. Plain, direct, and conversational.
+  Fragments are fine. Avoid long explanations or full formal sentences.
+No explanation, no markdown, no bullet points.`;
 
 export default async function handler(request) {
   if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
