@@ -32,15 +32,22 @@ Follow ALL of these rules:
    movement over perfection.
 6. ACTION-BASED NOT TIME-BASED — Define completion by observable output,
    never by duration.
-7. For batch 1 only: begin with 1 to 2 gateway tasks — ultra-low-resistance
+7. SURFACE HIDDEN DEPENDENCIES — Identify invisible sub-requirements and
+   surface them as explicit steps. If the task secretly requires finding
+   files, making decisions, or gathering information first, those steps
+   must appear before the main action steps they unblock.
+8. For batch 1 only: begin with 1 to 2 gateway tasks — ultra-low-resistance
    actions like opening the app, sitting down, or opening the document.
-8. For later batches: skip gateway tasks and move directly into progressive
+9. For later batches: skip gateway tasks and move directly into progressive
    action steps that advance the task.
 
 Return only a JSON array of exactly 4 objects each with a title and
-description field following these strict length rules:
-- Title: maximum 5 to 6 words. Short, punchy, and action-based.
-- Description: maximum 10 to 12 words. Plain, direct, and conversational.
+description field. Length targets are soft, not hard. Aim for these
+ranges but go longer when the step genuinely needs more words to be
+clear and useful. Never pad unnecessarily, but never cut meaning just
+to hit a word count.
+- Title: aim for 5 to 6 words. Short, punchy, and action-based.
+- Description: aim for 10 to 12 words. Plain, direct, and conversational.
   Fragments are fine. Avoid long explanations or full formal sentences.
 No explanation, no markdown, no bullet points.`;
 
