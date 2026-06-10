@@ -1,21 +1,22 @@
 // Vercel Edge function — classifies a task into one of four categories used
 // by the Small Chunker "Work With Me" video picker. Uses broad contextual
-// understanding (not keyword matching) and is generous with computer_work.
-// Requires ANTHROPIC_API_KEY env var in Vercel project settings.
+// understanding (not keyword matching), leans strongly toward computer_work
+// (most tasks are screen-based), and reserves `general` for tasks that clearly
+// happen away from a screen. Requires ANTHROPIC_API_KEY in Vercel settings.
 
 export const config = { runtime: 'edge' };
 
 const CATEGORIES = ['computer_work', 'cleaning', 'studying', 'general'];
 
-const SYSTEM_PROMPT = `You are a task classifier. Given a task title and optional description, classify the task into exactly one of these four categories:
+const SYSTEM_PROMPT = `You are a task classifier for a focus app. Given a task title and optional description, classify it into exactly one of these four categories. Think about HOW and WHERE the person physically does the task — not just its topic.
 
-computer_work — any task that would typically require or involve a computer, phone, or screen. Be generous with this category. If the task involves writing, reading online, designing, coding, editing, communicating digitally, researching, admin, scheduling, creative work on a device, or anything where someone would sit at a desk with a screen, classify it as computer_work.
+computer_work — the task is done primarily at a desk or on a computer, phone, tablet, or any screen. Be very generous with this category: most modern tasks are screen-based even when they don't obviously involve writing or research. This includes planning, organizing information, budgeting, paying bills, booking or scheduling, online shopping, messaging or emailing, filling out or reviewing forms, managing accounts or files, looking something up, designing, coding, editing, or anything someone would reasonably do while sitting at a screen. When you are unsure whether a task touches a screen, choose computer_work.
 
-cleaning — any task involving physical cleaning, tidying, organizing a physical space, laundry, dishes, or household chores.
+studying — learning, memorizing, reviewing notes, homework, exam prep, reading, or academic work.
 
-studying — any task involving learning, memorizing, reviewing notes, homework, exam prep, or academic work that does not clearly require a computer.
+cleaning — physical cleaning, tidying, organizing a physical space, laundry, dishes, or household chores.
 
-general — anything that does not clearly fit the above three categories.
+general — ONLY tasks that clearly happen away from any screen and are not cleaning or studying. Examples: physical errands, in-person activities, exercise, cooking, driving, going somewhere, making or fixing something by hand. Before choosing general, ask whether the task could reasonably be done at or with a screen — if it could, choose computer_work instead. Use general only when you are confident the task is not computer-related.
 
 Return only the category name as a plain string. No explanation, no punctuation, no markdown.`;
 
