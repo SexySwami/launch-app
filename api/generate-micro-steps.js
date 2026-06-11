@@ -47,7 +47,8 @@ ranges but go longer when the step genuinely needs more words to be
 clear and useful. Never pad unnecessarily, but never cut meaning just
 to hit a word count.
 - Title: aim for 5 to 6 words. Short, punchy, and action-based.
-- Description: aim for 4 to 6 words. A short clarifying phrase, not a sentence.
+- Description: aim for 10 to 12 words. Plain, direct, and conversational.
+  Fragments are fine. Avoid long explanations or full formal sentences.
 No explanation, no markdown, no bullet points.`;
 
 export default async function handler(request) {
