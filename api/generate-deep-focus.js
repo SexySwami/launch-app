@@ -12,7 +12,7 @@ These four steps are one batch in an ongoing sequence. They should continue natu
 
 Each step must have:
 - A title of no more than 5 to 7 words. Write naturally and specifically to the task. Only add urgency or motivational language when it genuinely fits that specific step. Do not force motivational language onto every card.
-- A description of 4 to 6 words. A short clarifying phrase, not a sentence.
+- A description that is as short as possible — aim for 8 to 10 words but go longer if the step genuinely needs more context to be useful. Never pad it unnecessarily. If it can be said in 6 words, use 6 words. If it needs 20 to be clear and helpful, use 20.
 
 Return only a JSON array of four objects each with a title and description field. No explanation, no markdown, no bullet points.`;
 

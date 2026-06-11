@@ -15,7 +15,7 @@ Phase definitions — use exactly these tags:
 
 Rules for each new step:
 - Title: 5-7 words, starts with an action verb, highly specific to the mission
-- Hint: one short sentence that adds concrete context
+- Hint: 4 to 6 words — a short clarifying phrase, not a full sentence
 - Must follow naturally from the accepted steps
 - Never repeat what a locked step already covers
 
@@ -31,7 +31,7 @@ Each new step must:
 - Use specific, physical, observable actions only
 - Follow naturally from the accepted steps without repeating any of them
 
-Aim for: title 5-6 words, description 4-6 words (a short clarifying phrase, not a sentence).
+Aim for: title 5-6 words, description 10-12 words (go longer only if genuinely needed for clarity).
 
 Output JSON only, no explanation:
 [{"title":"...","description":"..."}]`;
@@ -40,7 +40,7 @@ const SYSTEM_DEEP = `You are an expert task planner specializing in ADHD-friendl
 
 Each step must have:
 - A title of 5-7 words (specific to the task, action-based)
-- A description of 4 to 6 words — a short clarifying phrase, not a sentence
+- A description as short as possible — aim 8-10 words, go longer only if the step genuinely needs more context
 
 Follow naturally from the accepted steps without repeating any of them.
 
