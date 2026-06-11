@@ -32,8 +32,10 @@ title must:
 - Aim for 5 to 6 words. Soft target — go a little longer when needed,
   never pad just to hit a word count
 
+Each option has a title (5-6 words) and a description (4-6 words — a short clarifying phrase, not a full sentence).
+
 Output JSON ONLY, no preamble, explanation, or trailing prose:
-{"options":["First option","Second option","Third option"]}`;
+{"options":[{"title":"First option","description":"short phrase"},{"title":"Second option","description":"short phrase"},{"title":"Third option","description":"short phrase"}]}`;
 
 export default async function handler(request) {
   if (request.method !== 'POST') {
@@ -99,7 +101,7 @@ export default async function handler(request) {
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
-        max_tokens: 256,
+        max_tokens: 512,
         system: SYSTEM_PROMPT,
         messages: [{ role: 'user', content: userMessage }],
       }),
@@ -124,7 +126,13 @@ export default async function handler(request) {
   catch { return json({ error: 'Invalid JSON from model', raw: text }, 502); }
 
   const options = Array.isArray(parsed.options)
-    ? parsed.options.filter(o => typeof o === 'string' && o.trim()).slice(0, 3)
+    ? parsed.options
+        .filter(o => o && typeof o.title === 'string' && o.title.trim())
+        .slice(0, 3)
+        .map(o => ({
+          title: o.title.trim(),
+          description: typeof o.description === 'string' ? o.description.trim() : '',
+        }))
     : [];
 
   if (options.length === 0) {
