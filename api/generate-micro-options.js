@@ -17,8 +17,10 @@ micro-step for a different, better alternative. You will be given:
 
 Generate exactly 3 alternative titles for the current step. Each new
 title must:
-- Express a different phrasing of the same essential action — pick three
-  GENUINELY different angles, not rewordings of each other
+- Offer a GENUINELY different way to accomplish what this step is for —
+  three distinct approaches or tactics, not rewordings, synonyms, or light
+  edits of the current step or of each other. The user wants a fresh take,
+  so each option should feel like a new idea they had not already considered
 - Feel emotionally safe and immediately doable — no ramp-up or motivation
   required
 - Be binary: clear start, clear end
