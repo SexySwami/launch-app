@@ -18,9 +18,10 @@ For each request, generate exactly 3 alternative micro-steps for the same phase 
 - Match the phase exactly — never suggest execution for an OPEN step, never suggest setup for a PUSH step
 - Be specific to the mission (avoid generic phrases like "just start", "begin work", "get focused")
 - Be three GENUINELY different angles — not rewordings of each other
+- Each option has a title (2-7 words) and a hint (4-6 words — a short clarifying phrase, not a full sentence)
 
 Output JSON ONLY, with no preamble, explanation, or trailing prose:
-{"options":["First option","Second option","Third option"]}`;
+{"options":[{"title":"First option","hint":"short phrase here"},{"title":"Second option","hint":"short phrase here"},{"title":"Third option","hint":"short phrase here"}]}`;
 
 export default async function handler(request) {
   if (request.method !== 'POST') {
@@ -64,7 +65,7 @@ export default async function handler(request) {
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
-        max_tokens: 256,
+        max_tokens: 512,
         system: SYSTEM_PROMPT,
         messages: [{ role: 'user', content: userMessage }],
       }),
@@ -89,7 +90,13 @@ export default async function handler(request) {
   catch { return json({ error: 'Invalid JSON from model', raw: text }, 502); }
 
   const options = Array.isArray(parsed.options)
-    ? parsed.options.filter(o => typeof o === 'string' && o.trim()).slice(0, 3)
+    ? parsed.options
+        .filter(o => o && typeof o.title === 'string' && o.title.trim())
+        .slice(0, 3)
+        .map(o => ({
+          title: o.title.trim(),
+          hint: typeof o.hint === 'string' ? o.hint.trim() : '',
+        }))
     : [];
 
   if (options.length === 0) {
