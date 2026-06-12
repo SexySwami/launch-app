@@ -7,7 +7,7 @@ const SYSTEM_PROMPT = `You are an expert task planner who specializes in ADHD-fr
 
 Each step must have:
 - A title of no more than 5 to 7 words. Write naturally and specifically to the task. Only add urgency or motivational language when it genuinely fits that specific step. Do not force motivational language onto every card.
-- A description of 4 to 6 words — a short clarifying phrase, not a full sentence.
+- A description as short as possible — aim for 6 to 8 words but go longer only if the step genuinely needs more context. Never pad. Plain, direct, and conversational. Fragments are fine.
 
 Return only a JSON array of four objects each with a title and description field. No explanation, no markdown, no bullet points.`;
 
