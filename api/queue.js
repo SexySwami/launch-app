@@ -7,7 +7,6 @@
 export const config = { runtime: 'edge' };
 
 const LEGACY_KEY = 'launch:queue';
-const VALID_FOLDERS = new Set(['work', 'personal', 'health', 'dailies', 'short-list']);
 
 // Resolve the Redis key for a given folder. Work doubles as the legacy default
 // so the user's existing data is reachable both ways during/after migration.
@@ -18,9 +17,9 @@ function keyFor(folder) {
 
 function folderParam(request) {
   const u = new URL(request.url);
-  const f = (u.searchParams.get('folder') || '').toLowerCase();
+  // Sanitize to lowercase alphanumeric + hyphens, max 64 chars.
+  const f = (u.searchParams.get('folder') || '').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 64);
   if (!f) return 'work';
-  if (!VALID_FOLDERS.has(f)) return 'work';
   return f;
 }
 
