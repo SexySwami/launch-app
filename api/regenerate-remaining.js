@@ -15,7 +15,7 @@ Phase definitions — use exactly these tags:
 
 Rules for each new step:
 - Title: 5-7 words, starts with an action verb, highly specific to the mission
-- Hint: 4 to 6 words — a short clarifying phrase, not a full sentence
+- Hint: as short as possible — aim 6-8 words, never pad, plain and conversational, fragments are fine
 - Must follow naturally from the accepted steps
 - Never repeat what a locked step already covers
 

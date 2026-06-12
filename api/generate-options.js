@@ -18,7 +18,7 @@ For each request, generate exactly 3 alternative micro-steps for the same phase 
 - Match the phase exactly — never suggest execution for an OPEN step, never suggest setup for a PUSH step
 - Be specific to the mission (avoid generic phrases like "just start", "begin work", "get focused")
 - Be three GENUINELY different angles — not rewordings of each other
-- Each option has a title (2-7 words) and a hint (4-6 words — a short clarifying phrase, not a full sentence)
+- Each option has a title (2-7 words) and a hint (as short as possible — aim 6-8 words, never pad, plain and conversational, fragments are fine)
 
 Output JSON ONLY, with no preamble, explanation, or trailing prose:
 {"options":[{"title":"First option","hint":"short phrase here"},{"title":"Second option","hint":"short phrase here"},{"title":"Third option","hint":"short phrase here"}]}`;
