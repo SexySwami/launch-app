@@ -6,9 +6,9 @@
 
 export const config = { runtime: 'edge' };
 
-const CATEGORIES = ['computer_work', 'cleaning', 'studying', 'general'];
+const CATEGORIES = ['computer_work', 'cleaning', 'studying', 'cooking', 'general'];
 
-const SYSTEM_PROMPT = `You are a task classifier for a focus app. Given a task title and optional description, classify it into exactly one of these four categories. Think about HOW and WHERE the person physically does the task — not just its topic.
+const SYSTEM_PROMPT = `You are a task classifier for a focus app. Given a task title and optional description, classify it into exactly one of these five categories. Think about HOW and WHERE the person physically does the task — not just its topic.
 
 computer_work — the task is done primarily at a desk or on a computer, phone, tablet, or any screen. Be very generous with this category: most modern tasks are screen-based even when they don't obviously involve writing or research. This includes planning, organizing information, budgeting, paying bills, booking or scheduling, online shopping, messaging or emailing, filling out or reviewing forms, managing accounts or files, looking something up, designing, coding, editing, or anything someone would reasonably do while sitting at a screen. When you are unsure whether a task touches a screen, choose computer_work.
 
@@ -16,7 +16,9 @@ studying — learning, memorizing, reviewing notes, homework, exam prep, reading
 
 cleaning — physical cleaning, tidying, organizing a physical space, laundry, dishes, or household chores.
 
-general — ONLY tasks that clearly happen away from any screen and are not cleaning or studying. Examples: physical errands, in-person activities, exercise, cooking, driving, going somewhere, making or fixing something by hand. Before choosing general, ask whether the task could reasonably be done at or with a screen — if it could, choose computer_work instead. Use general only when you are confident the task is not computer-related.
+cooking — preparing food or drink: cooking, baking, meal prepping, following a recipe, making coffee or tea, or any task done primarily in the kitchen.
+
+general — ONLY tasks that clearly happen away from any screen and are not cleaning, cooking, or studying. Examples: physical errands, in-person activities, exercise, driving, going somewhere, making or fixing something by hand. Before choosing general, ask whether the task could reasonably be done at or with a screen — if it could, choose computer_work instead. Use general only when you are confident the task is not computer-related.
 
 Return only the category name as a plain string. No explanation, no punctuation, no markdown.`;
 
