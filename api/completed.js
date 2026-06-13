@@ -22,7 +22,7 @@ export const config = { runtime: 'edge' };
 
 const COMPLETED_KEY = 'launch:completed';
 const QUEUE_LEGACY_KEY = 'launch:queue';
-const VALID_FOLDERS = new Set(['work', 'personal', 'health', 'dailies']);
+const VALID_FOLDERS = new Set(['work', 'personal', 'health', 'dailies', 'short-list']);
 
 function normalizeFolder(f) {
   const v = (f || '').toString().toLowerCase();
@@ -132,6 +132,7 @@ export default async function handler(request) {
             sourceItemId: body?.sourceItemId || null,
             sourceItemIndex: typeof body?.sourceItemIndex === 'number' ? body.sourceItemIndex : null,
             folderId: normalizeFolder(body?.folderId),
+            wasOnShortList: Boolean(body?.wasOnShortList),
             text: (body?.text || '').toString().slice(0, 500),
             description: typeof body?.description === 'string' ? body.description.slice(0, 2000) : null,
             microSteps: [],
@@ -146,6 +147,7 @@ export default async function handler(request) {
           if (typeof body?.sourceItemIndex === 'number') entry.sourceItemIndex = body.sourceItemIndex;
           if (body?.folderId) entry.folderId = normalizeFolder(body.folderId);
           if (body?.description !== undefined) entry.description = typeof body.description === 'string' ? body.description.slice(0, 2000) : null;
+          if (body?.wasOnShortList) entry.wasOnShortList = true;
         }
 
         if (action === 'log-step') {
@@ -178,7 +180,7 @@ export default async function handler(request) {
         let updatedQueue = await readKey(queueKey);
         if (entry) {
           const newItem = {
-            id: newId(),
+            id: entry.sourceItemId || newId(),
             text: entry.text || '',
             createdAt: Date.now(),
             ...(typeof entry.description === 'string' && entry.description ? { description: entry.description } : {}),
@@ -197,6 +199,17 @@ export default async function handler(request) {
           if (targetFolder === 'work') {
             try { await writeKey(QUEUE_LEGACY_KEY, updatedQueue); } catch {}
           }
+        }
+
+        // If the item was also on the Short List when it was completed,
+        // restore a copy there too.
+        if (entry?.wasOnShortList) {
+          const shortListKey = `${QUEUE_LEGACY_KEY}:short-list`;
+          const shortList = await readKey(shortListKey);
+          await writeKey(shortListKey, [
+            { id: newId(), text: entry.text || '', createdAt: Date.now() },
+            ...shortList,
+          ]);
         }
 
         await writeKey(COMPLETED_KEY, updatedCompleted);
