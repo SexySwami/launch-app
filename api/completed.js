@@ -202,14 +202,23 @@ export default async function handler(request) {
         }
 
         // If the item was also on the Short List when it was completed,
-        // restore a copy there too.
-        if (entry?.wasOnShortList) {
+        // restore a proper reference entry (with sourceItemId) — deduped.
+        if (entry?.wasOnShortList && entry?.sourceItemId) {
           const shortListKey = `${QUEUE_LEGACY_KEY}:short-list`;
           const shortList = await readKey(shortListKey);
-          await writeKey(shortListKey, [
-            { id: newId(), text: entry.text || '', createdAt: Date.now() },
-            ...shortList,
-          ]);
+          const alreadyThere = shortList.some(i => i.sourceItemId === entry.sourceItemId);
+          if (!alreadyThere) {
+            await writeKey(shortListKey, [
+              {
+                id: newId(),
+                text: entry.text || '',
+                sourceItemId: entry.sourceItemId,
+                sourceFolderId: normalizeFolder(entry.folderId),
+                createdAt: Date.now(),
+              },
+              ...shortList,
+            ]);
+          }
         }
 
         await writeKey(COMPLETED_KEY, updatedCompleted);
