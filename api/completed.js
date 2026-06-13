@@ -175,7 +175,7 @@ export default async function handler(request) {
         let updatedQueue = await readKey(queueKey);
         if (entry) {
           const newItem = {
-            id: newId(),
+            id: entry.sourceItemId || newId(),
             text: entry.text || '',
             createdAt: Date.now(),
           };
