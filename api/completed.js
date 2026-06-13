@@ -161,6 +161,39 @@ export default async function handler(request) {
           });
         } else {
           entry.completedAt = Date.now();
+
+          // Server-authoritative Short List detection.
+          //
+          // If a copy of this item is still on the Short List when it's
+          // completed, remove it here and mark the entry so `restore` can put it
+          // back on the Short List later. This does NOT depend on the client
+          // detecting the Short List membership or threading a `shortListEntryId`
+          // through launch — it's a self-contained check that runs every finalize.
+          //
+          // It's also a safe superset of any client behavior: if the client
+          // already removed the Short List copy (and passed wasOnShortList in the
+          // body, honored above), this simply finds nothing and is a no-op.
+          if (normalizeFolder(entry.folderId) !== 'short-list') {
+            try {
+              const shortListKey = `${QUEUE_LEGACY_KEY}:short-list`;
+              const shortList = await readKey(shortListKey);
+              const needle = (entry.text || '').trim().toLowerCase();
+              const idx = shortList.findIndex(i =>
+                (entry.sourceItemId && i && i.sourceItemId === entry.sourceItemId) ||
+                (needle && i && (i.text || '').trim().toLowerCase() === needle)
+              );
+              if (idx >= 0) {
+                entry.wasOnShortList = true;
+                // If the completed entry lacks a sourceItemId, adopt the matched
+                // Short List entry's so restore can rebuild the reference.
+                if (!entry.sourceItemId && shortList[idx]?.sourceItemId) {
+                  entry.sourceItemId = shortList[idx].sourceItemId;
+                }
+                const updatedShortList = shortList.filter((_, i) => i !== idx);
+                await writeKey(shortListKey, updatedShortList);
+              }
+            } catch {}
+          }
         }
 
         await writeKey(COMPLETED_KEY, all);
