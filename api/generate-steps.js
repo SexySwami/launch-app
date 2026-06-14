@@ -41,10 +41,19 @@ export default async function handler(request) {
   const mission = (body?.mission || '').toString().trim();
   if (!mission) return json({ error: 'Missing mission' }, 400);
   const description = typeof body?.description === 'string' ? body.description.trim() : '';
+  const previousSteps = Array.isArray(body?.previousSteps) ? body.previousSteps : [];
 
-  const userContent = description
+  let userContent = description
     ? `Task: "${mission}"\n\nDescription: "${description}"`
     : `Task: "${mission}"`;
+
+  if (previousSteps.length > 0) {
+    const prevList = previousSteps
+      .map((s, i) => `${i + 1}. ${(s.title || '').trim()}${s.hint ? ` — ${s.hint.trim()}` : ''}`)
+      .filter(Boolean)
+      .join('\n');
+    userContent += `\n\nSteps already completed by the user:\n${prevList}\n\nGenerate 4 new steps that continue from where the user left off. Do NOT repeat or rephrase any completed step. Pick up from the natural next action and drive toward a finished result.`;
+  }
 
   let upstream;
   try {
