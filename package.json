@@ -1,5 +1,8 @@
 {
   "name": "launch-app",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "@clerk/backend": "^3.7.0"
+  }
 }

@@ -20,8 +20,15 @@
 
 export const config = { runtime: 'edge' };
 
-const COMPLETED_KEY = 'launch:completed';
-const QUEUE_LEGACY_KEY = 'launch:queue';
+import { getUserId } from './_auth.js';
+
+// Per-user key helpers.
+const completedKey  = (uid) => `launch:${uid}:completed`;
+const queueBase     = (uid) => `launch:${uid}:queue`;
+
+// Legacy global keys for one-time migration on first sign-in.
+const COMPLETED_KEY      = 'launch:completed';
+const QUEUE_LEGACY_KEY   = 'launch:queue';
 const VALID_FOLDERS = new Set(['work', 'personal', 'health', 'dailies', 'short-list']);
 
 function normalizeFolder(f) {
@@ -30,11 +37,8 @@ function normalizeFolder(f) {
   return v;
 }
 
-function queueKeyFor(folder) {
-  const f = normalizeFolder(folder);
-  // Mirror queue.js: Work uses both `launch:queue:work` and the legacy
-  // `launch:queue` key (the legacy mirror is updated below on write).
-  return `${QUEUE_LEGACY_KEY}:${f}`;
+function queueKeyFor(folder, uid) {
+  return `${queueBase(uid)}:${normalizeFolder(folder)}`;
 }
 
 function creds() {
@@ -103,16 +107,24 @@ function finalizedSorted(all) {
 export default async function handler(request) {
   const { url, token } = creds();
   if (!url || !token) {
-    return json({
-      error: 'Cloud store not configured. Install Upstash Redis on this Vercel project and redeploy.',
-    }, 500);
+    return json({ error: 'Cloud store not configured.' }, 500);
   }
+
+  const uid = await getUserId(request);
+  if (!uid) return json({ error: 'Unauthorized' }, 401);
+
+  const CKEY = completedKey(uid);
 
   const u = new URL(request.url);
 
   try {
     if (request.method === 'GET') {
-      const all = await readKey(COMPLETED_KEY);
+      let all = await readKey(CKEY);
+      // One-time migration from legacy global key on first sign-in.
+      if (!all.length) {
+        const legacy = await readKey(COMPLETED_KEY);
+        if (legacy.length) { await writeKey(CKEY, legacy); all = legacy; }
+      }
       return json({ items: finalizedSorted(all) }, 200);
     }
 
@@ -124,7 +136,7 @@ export default async function handler(request) {
         const id = (body?.id || '').toString();
         if (!id) return json({ error: 'Missing id' }, 400);
 
-        const all = await readKey(COMPLETED_KEY);
+        const all = await readKey(CKEY);
         let entry = all.find(e => e.id === id);
         if (!entry) {
           entry = {
@@ -175,7 +187,7 @@ export default async function handler(request) {
           // body, honored above), this simply finds nothing and is a no-op.
           if (normalizeFolder(entry.folderId) !== 'short-list') {
             try {
-              const shortListKey = `${QUEUE_LEGACY_KEY}:short-list`;
+              const shortListKey = queueKeyFor('short-list', uid);
               const shortList = await readKey(shortListKey);
               const needle = (entry.text || '').trim().toLowerCase();
               const idx = shortList.findIndex(i =>
@@ -196,7 +208,7 @@ export default async function handler(request) {
           }
         }
 
-        await writeKey(COMPLETED_KEY, all);
+        await writeKey(CKEY, all);
         return json({ entry: publicShape(entry) }, 200);
       }
 
@@ -204,12 +216,12 @@ export default async function handler(request) {
         const id = (body?.id || '').toString();
         if (!id) return json({ error: 'Missing id' }, 400);
 
-        const completed = await readKey(COMPLETED_KEY);
+        const completed = await readKey(CKEY);
         const entry = completed.find(e => e.id === id);
         const updatedCompleted = completed.filter(e => e.id !== id);
 
         const targetFolder = normalizeFolder(entry?.folderId);
-        const queueKey = queueKeyFor(targetFolder);
+        const queueKey = queueKeyFor(targetFolder, uid);
         let updatedQueue = await readKey(queueKey);
         if (entry) {
           const newItem = {
@@ -228,16 +240,12 @@ export default async function handler(request) {
             ...updatedQueue.slice(insertAt),
           ];
           await writeKey(queueKey, updatedQueue);
-          // Mirror Work writes to the legacy key so any legacy reader stays in sync.
-          if (targetFolder === 'work') {
-            try { await writeKey(QUEUE_LEGACY_KEY, updatedQueue); } catch {}
-          }
         }
 
         // If the item was also on the Short List when it was completed,
         // restore a proper reference entry (with sourceItemId) — deduped.
         if (entry?.wasOnShortList && entry?.sourceItemId) {
-          const shortListKey = `${QUEUE_LEGACY_KEY}:short-list`;
+          const shortListKey = queueKeyFor('short-list', uid);
           const shortList = await readKey(shortListKey);
           const alreadyThere = shortList.some(i => i.sourceItemId === entry.sourceItemId);
           if (!alreadyThere) {
@@ -254,7 +262,7 @@ export default async function handler(request) {
           }
         }
 
-        await writeKey(COMPLETED_KEY, updatedCompleted);
+        await writeKey(CKEY, updatedCompleted);
         return json({
           restored: entry ? publicShape(entry) : null,
           items: finalizedSorted(updatedCompleted),
@@ -269,9 +277,9 @@ export default async function handler(request) {
     if (request.method === 'DELETE') {
       const id = u.searchParams.get('id');
       if (!id) return json({ error: 'Missing id' }, 400);
-      const all = await readKey(COMPLETED_KEY);
+      const all = await readKey(CKEY);
       const updated = all.filter(e => e.id !== id);
-      await writeKey(COMPLETED_KEY, updated);
+      await writeKey(CKEY, updated);
       return json({ items: finalizedSorted(updated) }, 200);
     }
 

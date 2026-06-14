@@ -5,6 +5,10 @@
 
 export const config = { runtime: 'edge' };
 
+import { getUserId } from './_auth.js';
+
+const shortListKey = (uid) => `launch:${uid}:queue:short-list`;
+// Legacy key for one-time migration.
 const SHORT_LIST_KEY = 'launch:queue:short-list';
 
 function creds() {
@@ -47,7 +51,12 @@ export default async function handler(request) {
   const { url, token } = creds();
   if (!url || !token) return json({ error: 'Cloud queue not configured' }, 500);
 
+  const uid = await getUserId(request);
+  if (!uid) return json({ error: 'Unauthorized' }, 401);
+
   if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
+
+  const SL_KEY = shortListKey(uid);
 
   try {
     const body = await request.json().catch(() => ({}));
@@ -58,7 +67,13 @@ export default async function handler(request) {
     const t = (text || '').toString().trim();
     if (!t) return json({ error: 'Missing text' }, 400);
 
-    const items = await readKey(SHORT_LIST_KEY);
+    let items = await readKey(SL_KEY);
+    // One-time migration from legacy global key.
+    if (!items.length) {
+      const legacy = await readKey(SHORT_LIST_KEY);
+      if (legacy.length) { await writeKey(SL_KEY, legacy); items = legacy; }
+    }
+
     if (items.some(i => i.sourceItemId === itemId)) {
       return json({ error: 'Already in Short List', alreadyIn: true }, 409);
     }
@@ -70,7 +85,7 @@ export default async function handler(request) {
       sourceFolderId,
       createdAt: Date.now(),
     };
-    await writeKey(SHORT_LIST_KEY, [...items, entry]);
+    await writeKey(SL_KEY, [...items, entry]);
     return json({ entry }, 200);
   } catch (err) {
     return json({ error: err.message || 'Server error' }, 500);

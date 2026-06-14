@@ -6,11 +6,19 @@
 
 export const config = { runtime: 'edge' };
 
+import { getUserId } from './_auth.js';
+
+// Global (pre-auth) key prefix — used only for one-time migration of the
+// original owner's data into the new per-user namespace on first sign-in.
 const LEGACY_KEY = 'launch:queue';
 
-// Resolve the Redis key for a given folder. Work doubles as the legacy default
-// so the user's existing data is reachable both ways during/after migration.
-function keyFor(folder) {
+// Resolve the per-user Redis key for a given folder.
+function keyFor(folder, uid) {
+  return `launch:${uid}:queue:${folder || 'work'}`;
+}
+
+// Legacy global key (pre-auth) for migration reads.
+function legacyKeyFor(folder) {
   if (!folder || folder === 'work') return `${LEGACY_KEY}:work`;
   return `${LEGACY_KEY}:${folder}`;
 }
@@ -70,31 +78,25 @@ async function writeKeyRaw(key, items) {
   }
 }
 
-// Read a folder's queue. For Work, lazy-migrate from the pre-folder
-// `launch:queue` key if the new `launch:queue:work` key is empty/unset —
-// this preserves the user's existing checklist on first load.
-async function readQueue(folder) {
-  const key = keyFor(folder);
+// Read a folder's queue for a specific user. On first access (null result),
+// automatically migrates data from the legacy global keys so existing data
+// is not lost when auth is introduced.
+async function readQueue(folder, uid) {
+  const key = keyFor(folder, uid);
   const items = await readKeyRaw(key);
   if (items !== null) return items;
-  if (folder === 'work') {
-    const legacy = await readKeyRaw(LEGACY_KEY);
-    if (legacy && legacy.length > 0) {
-      await writeKeyRaw(key, legacy); // one-shot migration
-      return legacy;
-    }
+  // One-time migration: copy legacy global data into this user's namespace.
+  const legacyKey = legacyKeyFor(folder);
+  const legacy = await readKeyRaw(legacyKey);
+  if (legacy && legacy.length > 0) {
+    await writeKeyRaw(key, legacy);
+    return legacy;
   }
   return [];
 }
 
-async function writeQueue(folder, items) {
-  await writeKeyRaw(keyFor(folder), items);
-  // Keep the legacy key in lockstep with Work so any code path still
-  // reading `launch:queue` (e.g. the completed.js restore action) keeps
-  // working until everything is migrated.
-  if (folder === 'work') {
-    try { await writeKeyRaw(LEGACY_KEY, items); } catch {}
-  }
+async function writeQueue(folder, uid, items) {
+  await writeKeyRaw(keyFor(folder, uid), items);
 }
 
 function newId() {
@@ -105,17 +107,17 @@ function newId() {
 export default async function handler(request) {
   const { url, token } = creds();
   if (!url || !token) {
-    return json({
-      error:
-        'Cloud queue not configured. Install the Upstash Redis integration on Vercel (Storage → Marketplace) and connect it to this project, then redeploy.',
-    }, 500);
+    return json({ error: 'Cloud queue not configured.' }, 500);
   }
+
+  const uid = await getUserId(request);
+  if (!uid) return json({ error: 'Unauthorized' }, 401);
 
   const folder = folderParam(request);
 
   try {
     if (request.method === 'GET') {
-      const items = await readQueue(folder);
+      const items = await readQueue(folder, uid);
       return json({ items }, 200);
     }
 
@@ -125,31 +127,21 @@ export default async function handler(request) {
 
       const body = await request.json().catch(() => ({}));
 
-      // Accept either { text: "..." } (single) or { texts: ["...", "..."] } (batch)
       let texts = [];
       if (Array.isArray(body?.texts)) {
-        texts = body.texts
-          .filter(t => typeof t === 'string')
-          .map(t => t.trim())
-          .filter(t => t);
+        texts = body.texts.filter(t => typeof t === 'string').map(t => t.trim()).filter(t => t);
       } else if (body?.text) {
         const t = body.text.toString().trim();
         if (t) texts = [t];
       }
 
       if (texts.length === 0) return json({ error: 'Missing text or texts' }, 400);
-      if (texts.some(t => t.length > 500)) {
-        return json({ error: 'A task is too long (500 char max each)' }, 400);
-      }
+      if (texts.some(t => t.length > 500)) return json({ error: 'A task is too long (500 char max each)' }, 400);
 
-      const items = await readQueue(folder);
-      const added = texts.map(t => ({
-        id: newId(),
-        text: t,
-        createdAt: Date.now(),
-      }));
+      const items = await readQueue(folder, uid);
+      const added = texts.map(t => ({ id: newId(), text: t, createdAt: Date.now() }));
       const updated = append ? [...items, ...added] : [...added, ...items];
-      await writeQueue(folder, updated);
+      await writeQueue(folder, uid, updated);
       return json({ items: updated, added }, 200);
     }
 
@@ -158,40 +150,30 @@ export default async function handler(request) {
       const incoming = Array.isArray(body?.items) ? body.items : null;
       if (!incoming) return json({ error: 'Missing items array' }, 400);
 
-      // Entries are either flat items {id, text, createdAt} OR folders
-      // {id, type:'folder', name, children:[items], createdAt}. Folders can
-      // contain only flat items (no nested folders, at least for now).
       const cleanLeaf = (i) => {
         if (!i || typeof i.id !== 'string' || typeof i.text !== 'string') return null;
-        const leaf = {
-          id: i.id,
-          text: i.text.toString().slice(0, 500),
-          createdAt: Number.isFinite(i.createdAt) ? i.createdAt : Date.now(),
-        };
-        if (typeof i.description === 'string' && i.description) {
-          leaf.description = i.description.slice(0, 2000);
-        }
+        const leaf = { id: i.id, text: i.text.toString().slice(0, 500), createdAt: Number.isFinite(i.createdAt) ? i.createdAt : Date.now() };
+        if (typeof i.description === 'string' && i.description) leaf.description = i.description.slice(0, 2000);
+        if (i.sourceItemId) leaf.sourceItemId = i.sourceItemId;
+        if (i.sourceFolderId) leaf.sourceFolderId = i.sourceFolderId;
         return leaf;
       };
       const cleanEntry = (i) => {
         if (!i || typeof i.id !== 'string') return null;
         if (i.type === 'folder') {
           return {
-            id: i.id,
-            type: 'folder',
+            id: i.id, type: 'folder',
             name: typeof i.name === 'string' ? i.name.toString().slice(0, 200) : '',
             createdAt: Number.isFinite(i.createdAt) ? i.createdAt : Date.now(),
             expanded: Boolean(i.expanded),
-            children: Array.isArray(i.children)
-              ? i.children.map(cleanLeaf).filter(Boolean)
-              : [],
+            children: Array.isArray(i.children) ? i.children.map(cleanLeaf).filter(Boolean) : [],
           };
         }
         return cleanLeaf(i);
       };
       const cleaned = incoming.map(cleanEntry).filter(Boolean);
 
-      await writeQueue(folder, cleaned);
+      await writeQueue(folder, uid, cleaned);
       return json({ items: cleaned }, 200);
     }
 
@@ -200,9 +182,9 @@ export default async function handler(request) {
       const id = u.searchParams.get('id');
       if (!id) return json({ error: 'Missing id query param' }, 400);
 
-      const items = await readQueue(folder);
+      const items = await readQueue(folder, uid);
       const updated = items.filter(item => item.id !== id);
-      await writeQueue(folder, updated);
+      await writeQueue(folder, uid, updated);
       return json({ items: updated }, 200);
     }
 
