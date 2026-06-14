@@ -116,7 +116,18 @@ async function readQueue(folder, uid) {
   // Check whether this user is allowed to claim legacy data.
   const claimedBy = await readString(CLAIM_FLAG);
   if (claimedBy !== null && claimedBy !== uid) {
-    // Another user already claimed the legacy data — this is a new user.
+    // New user — seed the work folder with a sample task so the app
+    // isn't blank on first launch. Other folders start empty.
+    if (folder === 'work') {
+      const seed = [{
+        id: newId(),
+        text: 'Make Coffee',
+        description: 'This is a sample task. Tap Launch to try the app!',
+        createdAt: Date.now(),
+      }];
+      await writeKeyRaw(key, seed);
+      return seed;
+    }
     return [];
   }
 
