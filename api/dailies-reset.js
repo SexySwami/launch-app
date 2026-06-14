@@ -16,9 +16,15 @@
 
 export const config = { runtime: 'edge' };
 
-const QUEUE_KEY = 'launch:queue:dailies';
-const COMPLETED_KEY = 'launch:completed';
-const RESET_KEY = 'launch:dailies:last_reset';
+import { getUserId } from './_auth.js';
+
+const queueKey  = (uid) => `launch:${uid}:queue:dailies`;
+const completedKey = (uid) => `launch:${uid}:completed`;
+const resetKey  = (uid) => `launch:${uid}:dailies:last_reset`;
+
+// Legacy global keys for one-time migration.
+const LEGACY_QUEUE_KEY     = 'launch:queue:dailies';
+const LEGACY_COMPLETED_KEY = 'launch:completed';
 
 function creds() {
   const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
@@ -62,7 +68,14 @@ export default async function handler(request) {
     return json({ error: 'Cloud store not configured.' }, 500);
   }
 
+  const uid = await getUserId(request);
+  if (!uid) return json({ error: 'Unauthorized' }, 401);
+
   if (request.method !== 'GET') return json({ error: 'Method not allowed' }, 405);
+
+  const QUEUE_KEY     = queueKey(uid);
+  const COMPLETED_KEY = completedKey(uid);
+  const RESET_KEY     = resetKey(uid);
 
   const u = new URL(request.url);
   const localDate = u.searchParams.get('localDate') || '';
@@ -78,36 +91,39 @@ export default async function handler(request) {
 
     // Restore completed Dailies items that were completed since the last reset.
     const lastResetTimestamp = typeof lastReset?.timestamp === 'number' ? lastReset.timestamp : 0;
-    const allCompleted = (await readKey(COMPLETED_KEY)) || [];
+
+    // Read completed entries — migrate from legacy key on first access.
+    let allCompleted = (await readKey(COMPLETED_KEY)) || [];
+    if (!allCompleted.length) {
+      const legacy = (await readKey(LEGACY_COMPLETED_KEY)) || [];
+      if (legacy.length) { await writeKey(COMPLETED_KEY, legacy); allCompleted = legacy; }
+    }
+
     const toRestore = allCompleted.filter(e =>
-      e &&
-      e.completedAt &&
-      e.folderId === 'dailies' &&
-      e.completedAt >= lastResetTimestamp
+      e && e.completedAt && e.folderId === 'dailies' && e.completedAt >= lastResetTimestamp
     );
 
     if (toRestore.length > 0) {
-      const currentQueue = (await readKey(QUEUE_KEY)) || [];
+      // Read dailies queue — migrate from legacy key on first access.
+      let currentQueue = (await readKey(QUEUE_KEY)) || [];
+      if (!currentQueue.length) {
+        const legacy = (await readKey(LEGACY_QUEUE_KEY)) || [];
+        if (legacy.length) { await writeKey(QUEUE_KEY, legacy); currentQueue = legacy; }
+      }
 
-      // Sort by original queue position so items re-appear in their prior order.
       const sorted = [...toRestore].sort((a, b) => {
         const ai = typeof a.sourceItemIndex === 'number' ? a.sourceItemIndex : Infinity;
         const bi = typeof b.sourceItemIndex === 'number' ? b.sourceItemIndex : Infinity;
         return ai - bi;
       });
 
-      // Insert each item back at its recorded index, adjusting for prior inserts.
       let queue = [...currentQueue];
       for (const entry of sorted) {
         const idx = Math.max(0, Math.min(
           typeof entry.sourceItemIndex === 'number' ? entry.sourceItemIndex : queue.length,
           queue.length
         ));
-        const item = {
-          id: newId(),
-          text: entry.text || '',
-          createdAt: Date.now(),
-        };
+        const item = { id: newId(), text: entry.text || '', createdAt: Date.now() };
         if (entry.description) item.description = entry.description;
         queue = [...queue.slice(0, idx), item, ...queue.slice(idx)];
       }
