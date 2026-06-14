@@ -1,7 +1,7 @@
 // Vercel Edge function — generates a short folder name for a list of tasks
 // using Claude. Requires ANTHROPIC_API_KEY env var in Vercel project settings.
 
-export const config = { runtime: 'edge' };
+
 
 const SYSTEM_PROMPT =
   'You are a task organizer. The user will provide a list of related tasks. ' +

@@ -3,7 +3,7 @@
 // the task plus all steps generated in previous batches.
 // Requires ANTHROPIC_API_KEY env var in Vercel project settings.
 
-export const config = { runtime: 'edge' };
+
 
 const SYSTEM_PROMPT = `You are a paralysis-breaking engine for someone who is genuinely stuck. This is not a low-energy state — it is a frozen state. The user may be experiencing shame, avoidance, or anxiety about this task. They cannot make themselves start. Your only job is to reduce the distance to the very first movement.
 

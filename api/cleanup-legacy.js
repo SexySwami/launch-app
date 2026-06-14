@@ -2,7 +2,7 @@
 // users get a clean slate. Delete this file after running once.
 // Protected by a hardcoded secret to prevent accidental calls.
 
-export const config = { runtime: 'edge' };
+
 
 const SECRET = 'nuke-legacy-7x9q';
 

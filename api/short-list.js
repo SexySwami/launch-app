@@ -3,7 +3,7 @@
 // This endpoint exists only for the "add" action, which needs to cross-check the
 // source folder and store the reference alongside the item text.
 
-export const config = { runtime: 'edge' };
+
 
 import { getUserId } from './_auth.js';
 

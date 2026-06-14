@@ -18,7 +18,7 @@
 //   POST /api/completed?action=restore    → atomic remove-from-completed + insert-to-queue
 //   DELETE /api/completed?id=…            → remove from completed only
 
-export const config = { runtime: 'edge' };
+
 
 import { getUserId } from './_auth.js';
 

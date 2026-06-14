@@ -14,7 +14,7 @@
 //     → { reset: false }                   already reset today
 //     → { reset: true, restoredCount: N }  reset performed
 
-export const config = { runtime: 'edge' };
+
 
 import { getUserId } from './_auth.js';
 

@@ -3,7 +3,7 @@
 // leads with the hardest work and covers the full arc from start to done.
 // Requires ANTHROPIC_API_KEY env var in Vercel project settings.
 
-export const config = { runtime: 'edge' };
+
 
 const SYSTEM_PROMPT = `You are a high-performance task planner for someone who is energized, focused, and ready to work right now. This person has full executive function available. They do not need emotional softening, gateway tasks, or micro-babying — they need a clear, ambitious battle plan that makes real progress.
 

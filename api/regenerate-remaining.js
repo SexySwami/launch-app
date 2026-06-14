@@ -3,7 +3,7 @@
 // Supports three modes: fourStep (guided execution), micro (small chunker), deep (deep focus).
 // Requires ANTHROPIC_API_KEY env var in Vercel project settings.
 
-export const config = { runtime: 'edge' };
+
 
 const SYSTEM_FOUR_STEP = `You are an expert task planner. A mission has been partially broken into steps and the user has accepted some of them. You need to generate the remaining steps that follow naturally from the accepted ones.
 

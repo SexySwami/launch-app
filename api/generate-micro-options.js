@@ -5,7 +5,7 @@
 // step being swapped, and any already-suggested options to avoid.
 // Requires ANTHROPIC_API_KEY env var in Vercel project settings.
 
-export const config = { runtime: 'edge' };
+
 
 const SYSTEM_PROMPT = `You are an ADHD task re-chunking engine helping someone swap one
 micro-step for a different, better alternative. You will be given:

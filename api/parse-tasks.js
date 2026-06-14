@@ -1,7 +1,7 @@
 // Vercel Edge function — splits a pasted block of text into individual tasks
 // using Claude. Requires ANTHROPIC_API_KEY env var in Vercel project settings.
 
-export const config = { runtime: 'edge' };
+
 
 const SYSTEM_PROMPT =
   'You are a task parser. The user will paste a block of text containing ' +

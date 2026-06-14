@@ -4,7 +4,7 @@
 // (most tasks are screen-based), and reserves `general` for tasks that clearly
 // happen away from a screen. Requires ANTHROPIC_API_KEY in Vercel settings.
 
-export const config = { runtime: 'edge' };
+
 
 const CATEGORIES = ['computer_work', 'cleaning', 'studying', 'cooking', 'general'];
 

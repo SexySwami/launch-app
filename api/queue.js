@@ -4,7 +4,7 @@
 // integration env vars (KV_REST_API_URL/TOKEN) or raw Upstash vars
 // (UPSTASH_REDIS_REST_URL/TOKEN).
 
-export const config = { runtime: 'edge' };
+
 
 import { getUserId } from './_auth.js';
 

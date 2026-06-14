@@ -1,7 +1,7 @@
 // Vercel Edge function — asks Claude for 3 alternative micro-steps.
 // Requires ANTHROPIC_API_KEY env var in Vercel project settings.
 
-export const config = { runtime: 'edge' };
+
 
 const SYSTEM_PROMPT = `You're a coach helping someone with ADHD start tasks. They have a mission broken into 4 phases (OPEN/SCAN/EXEC/PUSH) and they want to swap the current step for a different, better alternative.
 

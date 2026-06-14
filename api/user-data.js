@@ -4,7 +4,7 @@
 // The claim flag (launch:legacy:claimed) is global and intentionally
 // left untouched so the original owner's migration status is preserved.
 
-export const config = { runtime: 'edge' };
+
 
 import { getUserId } from './_auth.js';
 
