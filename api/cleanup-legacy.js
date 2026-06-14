@@ -1,4 +1,6 @@
 // ONE-TIME cleanup endpoint — deletes all legacy global Redis keys so new
+
+export const config = { runtime: 'edge' };
 // users get a clean slate. Delete this file after running once.
 // Protected by a hardcoded secret to prevent accidental calls.
 

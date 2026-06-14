@@ -1,4 +1,6 @@
 // Vercel Edge function — generates 4 steps for a user in a Good (energized) state.
+
+export const config = { runtime: 'edge' };
 // No emotional softening, no gateway tasks — an ambitious battle plan that
 // leads with the hardest work and covers the full arc from start to done.
 // Requires ANTHROPIC_API_KEY env var in Vercel project settings.

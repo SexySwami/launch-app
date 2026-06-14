@@ -1,4 +1,6 @@
 // Vercel Edge function — asks Claude to generate one on-demand batch of 4
+
+export const config = { runtime: 'edge' };
 // ADHD-friendly micro-steps. Each call generates the next batch, given
 // the task plus all steps generated in previous batches.
 // Requires ANTHROPIC_API_KEY env var in Vercel project settings.

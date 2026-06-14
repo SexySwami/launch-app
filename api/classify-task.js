@@ -1,4 +1,6 @@
 // Vercel Edge function — classifies a task into one of four categories used
+
+export const config = { runtime: 'edge' };
 // by the Small Chunker "Work With Me" video picker. Uses broad contextual
 // understanding (not keyword matching), leans strongly toward computer_work
 // (most tasks are screen-based), and reserves `general` for tasks that clearly

@@ -1,4 +1,6 @@
 // Vercel Edge function — asks Claude for 3 alternative micro-steps.
+
+export const config = { runtime: 'edge' };
 // Requires ANTHROPIC_API_KEY env var in Vercel project settings.
 
 

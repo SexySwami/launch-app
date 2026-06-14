@@ -1,4 +1,6 @@
 // POST /api/short-list — add an item to the Short List by reference.
+
+export const config = { runtime: 'edge' };
 // The Short List queue itself (GET/PUT/DELETE) is served by /api/queue?folder=short-list.
 // This endpoint exists only for the "add" action, which needs to cross-check the
 // source folder and store the reference alongside the item text.

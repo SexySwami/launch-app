@@ -1,4 +1,6 @@
 // Vercel Edge function — Dailies daily reset.
+
+export const config = { runtime: 'edge' };
 //
 // At 12:00 AM local time, all completed Dailies items from the previous day
 // are restored to the active Dailies queue. Their completed entries are kept

@@ -1,4 +1,6 @@
 // Vercel Edge function — generates one on-demand batch of 4 Foggy-mode steps.
+
+export const config = { runtime: 'edge' };
 // Foggy = user feels hazy and unclear, not panicked. Goal: re-orient them
 // with one context-recovery step (batch 1 only), then give a tight
 // 20-25 minute window of session-scoped actions. No vague verbs, no

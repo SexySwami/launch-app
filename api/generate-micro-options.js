@@ -1,4 +1,6 @@
 // Vercel Edge function — asks Claude for 3 alternative micro-step titles.
+
+export const config = { runtime: 'edge' };
 // Independent from /api/generate-options (which is the 4-step regen
 // endpoint). Tailored to the Small Chunker context: receives the task,
 // optional description, all previously generated micro-steps, the current

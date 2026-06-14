@@ -1,4 +1,6 @@
 // DELETE /api/user-data
+
+export const config = { runtime: 'edge' };
 // Deletes ALL Redis keys belonging to the authenticated user
 // (everything under launch:{uid}:*).
 // The claim flag (launch:legacy:claimed) is global and intentionally

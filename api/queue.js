@@ -1,4 +1,6 @@
 // Vercel Edge function — cloud-backed mission queue.
+
+export const config = { runtime: 'edge' };
 // Stores the queue as a JSON-stringified array under a single Redis key.
 // Backed by Upstash Redis. Works with either the Vercel Marketplace
 // integration env vars (KV_REST_API_URL/TOKEN) or raw Upstash vars

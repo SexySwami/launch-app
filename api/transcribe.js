@@ -1,4 +1,6 @@
 // Vercel serverless function — proxies audio to OpenAI Whisper.
+
+export const config = { runtime: 'edge' };
 // Requires OPENAI_API_KEY environment variable to be set in Vercel project settings.
 
 

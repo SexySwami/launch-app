@@ -1,4 +1,6 @@
 // Vercel Edge function — splits a pasted block of text into individual tasks
+
+export const config = { runtime: 'edge' };
 // using Claude. Requires ANTHROPIC_API_KEY env var in Vercel project settings.
 
 

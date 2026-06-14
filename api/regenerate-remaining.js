@@ -1,4 +1,6 @@
 // Regenerates the N steps that follow a set of already-accepted (locked) steps.
+
+export const config = { runtime: 'edge' };
 // Used when a step is edited so that subsequent steps stay sequentially coherent.
 // Supports three modes: fourStep (guided execution), micro (small chunker), deep (deep focus).
 // Requires ANTHROPIC_API_KEY env var in Vercel project settings.

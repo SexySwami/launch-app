@@ -1,4 +1,6 @@
 // Vercel Edge function — generates a short folder name for a list of tasks
+
+export const config = { runtime: 'edge' };
 // using Claude. Requires ANTHROPIC_API_KEY env var in Vercel project settings.
 
 

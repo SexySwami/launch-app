@@ -1,4 +1,6 @@
 // Vercel Edge function — completed-missions store.
+
+export const config = { runtime: 'edge' };
 //
 // Storage: one Redis key (launch:completed) holding a JSON array of entries:
 //   {
