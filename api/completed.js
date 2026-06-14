@@ -29,6 +29,8 @@ const queueBase     = (uid) => `launch:${uid}:queue`;
 // Legacy global keys for one-time migration on first sign-in.
 const COMPLETED_KEY      = 'launch:completed';
 const QUEUE_LEGACY_KEY   = 'launch:queue';
+// Claim flag: whichever uid migrated first owns the legacy data.
+const CLAIM_FLAG         = 'launch:legacy:claimed';
 const VALID_FOLDERS = new Set(['work', 'personal', 'health', 'dailies', 'short-list']);
 
 function normalizeFolder(f) {
@@ -62,6 +64,43 @@ async function readKey(key) {
   } catch {
     return [];
   }
+}
+
+// Like readKey but returns null when the key is absent (vs [] when it's empty).
+// Used to distinguish "user has no data yet" from "user has an empty list".
+async function readNullable(key) {
+  const { url, token } = creds();
+  const res = await fetch(`${url}/get/${encodeURIComponent(key)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: 'no-store',
+  });
+  if (!res.ok) throw new Error(`Read failed (${res.status})`);
+  const data = await res.json();
+  if (data?.result == null) return null;
+  try {
+    const parsed = JSON.parse(data.result);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch { return []; }
+}
+
+async function readString(key) {
+  const { url, token } = creds();
+  const res = await fetch(`${url}/get/${encodeURIComponent(key)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: 'no-store',
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data?.result ?? null;
+}
+
+async function writeString(key, value) {
+  const { url, token } = creds();
+  await fetch(`${url}/set/${encodeURIComponent(key)}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'text/plain' },
+    body: String(value),
+  });
 }
 
 async function writeKey(key, value) {
@@ -119,11 +158,22 @@ export default async function handler(request) {
 
   try {
     if (request.method === 'GET') {
-      let all = await readKey(CKEY);
-      // One-time migration from legacy global key on first sign-in.
-      if (!all.length) {
-        const legacy = await readKey(COMPLETED_KEY);
-        if (legacy.length) { await writeKey(CKEY, legacy); all = legacy; }
+      let all = await readNullable(CKEY);
+      if (all === null) {
+        // Key absent — attempt migration only if this uid owns the legacy data.
+        const claimedBy = await readString(CLAIM_FLAG);
+        if (!claimedBy || claimedBy === uid) {
+          const legacy = await readKey(COMPLETED_KEY);
+          if (legacy.length) {
+            await writeKey(CKEY, legacy);
+            if (!claimedBy) await writeString(CLAIM_FLAG, uid);
+            all = legacy;
+          } else {
+            all = [];
+          }
+        } else {
+          all = []; // New user — clean slate.
+        }
       }
       return json({ items: finalizedSorted(all) }, 200);
     }

@@ -12,6 +12,10 @@ import { getUserId } from './_auth.js';
 // original owner's data into the new per-user namespace on first sign-in.
 const LEGACY_KEY = 'launch:queue';
 
+// Redis key that records which user ID claimed the legacy (pre-auth) data.
+// Only that user gets legacy migration; everyone else starts fresh.
+const CLAIM_FLAG = 'launch:legacy:claimed';
+
 // Resolve the per-user Redis key for a given folder.
 function keyFor(folder, uid) {
   return `launch:${uid}:queue:${folder || 'work'}`;
@@ -62,6 +66,27 @@ async function readKeyRaw(key) {
   }
 }
 
+// Read / write a plain string Redis value (used for the claim flag, not JSON).
+async function readString(key) {
+  const { url, token } = creds();
+  const res = await fetch(`${url}/get/${encodeURIComponent(key)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: 'no-store',
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data?.result ?? null;
+}
+
+async function writeString(key, value) {
+  const { url, token } = creds();
+  await fetch(`${url}/set/${encodeURIComponent(key)}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'text/plain' },
+    body: String(value),
+  });
+}
+
 async function writeKeyRaw(key, items) {
   const { url, token } = creds();
   const res = await fetch(`${url}/set/${encodeURIComponent(key)}`, {
@@ -79,17 +104,26 @@ async function writeKeyRaw(key, items) {
 }
 
 // Read a folder's queue for a specific user. On first access (null result),
-// automatically migrates data from the legacy global keys so existing data
-// is not lost when auth is introduced.
+// migrates legacy global data — but only if this uid already owns the legacy
+// data (claim flag matches) or nobody has claimed it yet (first sign-in).
 async function readQueue(folder, uid) {
   const key = keyFor(folder, uid);
   const items = await readKeyRaw(key);
   if (items !== null) return items;
+
+  // Check whether this user is allowed to claim legacy data.
+  const claimedBy = await readString(CLAIM_FLAG);
+  if (claimedBy !== null && claimedBy !== uid) {
+    // Another user already claimed the legacy data — this is a new user.
+    return [];
+  }
+
   // One-time migration: copy legacy global data into this user's namespace.
   const legacyKey = legacyKeyFor(folder);
   const legacy = await readKeyRaw(legacyKey);
   if (legacy && legacy.length > 0) {
     await writeKeyRaw(key, legacy);
+    if (!claimedBy) await writeString(CLAIM_FLAG, uid);
     return legacy;
   }
   return [];

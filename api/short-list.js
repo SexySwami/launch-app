@@ -10,6 +10,7 @@ import { getUserId } from './_auth.js';
 const shortListKey = (uid) => `launch:${uid}:queue:short-list`;
 // Legacy key for one-time migration.
 const SHORT_LIST_KEY = 'launch:queue:short-list';
+const CLAIM_FLAG     = 'launch:legacy:claimed';
 
 function creds() {
   const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
@@ -42,6 +43,41 @@ async function writeKey(key, items) {
   if (!res.ok) throw new Error(`Write failed (${res.status})`);
 }
 
+async function readNullable(key) {
+  const { url, token } = creds();
+  const res = await fetch(`${url}/get/${encodeURIComponent(key)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: 'no-store',
+  });
+  if (!res.ok) throw new Error(`Read failed (${res.status})`);
+  const data = await res.json();
+  if (data?.result == null) return null;
+  try {
+    const parsed = JSON.parse(data.result);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch { return []; }
+}
+
+async function readString(key) {
+  const { url, token } = creds();
+  const res = await fetch(`${url}/get/${encodeURIComponent(key)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: 'no-store',
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data?.result ?? null;
+}
+
+async function writeString(key, value) {
+  const { url, token } = creds();
+  await fetch(`${url}/set/${encodeURIComponent(key)}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'text/plain' },
+    body: String(value),
+  });
+}
+
 function newId() {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
   return `sl_${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -67,11 +103,20 @@ export default async function handler(request) {
     const t = (text || '').toString().trim();
     if (!t) return json({ error: 'Missing text' }, 400);
 
-    let items = await readKey(SL_KEY);
-    // One-time migration from legacy global key.
-    if (!items.length) {
-      const legacy = await readKey(SHORT_LIST_KEY);
-      if (legacy.length) { await writeKey(SL_KEY, legacy); items = legacy; }
+    let items = await readNullable(SL_KEY);
+    if (items === null) {
+      // Key absent — only migrate if this uid owns the legacy data.
+      const claimedBy = await readString(CLAIM_FLAG);
+      if (!claimedBy || claimedBy === uid) {
+        const legacy = await readKey(SHORT_LIST_KEY);
+        if (legacy.length) {
+          await writeKey(SL_KEY, legacy);
+          if (!claimedBy) await writeString(CLAIM_FLAG, uid);
+        }
+        items = legacy;
+      } else {
+        items = []; // New user — clean slate.
+      }
     }
 
     if (items.some(i => i.sourceItemId === itemId)) {

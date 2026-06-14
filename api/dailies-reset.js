@@ -25,6 +25,7 @@ const resetKey  = (uid) => `launch:${uid}:dailies:last_reset`;
 // Legacy global keys for one-time migration.
 const LEGACY_QUEUE_KEY     = 'launch:queue:dailies';
 const LEGACY_COMPLETED_KEY = 'launch:completed';
+const CLAIM_FLAG           = 'launch:legacy:claimed';
 
 function creds() {
   const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
@@ -42,6 +43,26 @@ async function readKey(key) {
   const data = await res.json();
   if (!data?.result) return null;
   try { return JSON.parse(data.result); } catch { return null; }
+}
+
+async function readString(key) {
+  const { url, token } = creds();
+  const res = await fetch(`${url}/get/${encodeURIComponent(key)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: 'no-store',
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data?.result ?? null;
+}
+
+async function writeString(key, value) {
+  const { url, token } = creds();
+  await fetch(`${url}/set/${encodeURIComponent(key)}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'text/plain' },
+    body: String(value),
+  });
 }
 
 async function writeKey(key, value) {
@@ -95,8 +116,15 @@ export default async function handler(request) {
     // Read completed entries — migrate from legacy key on first access.
     let allCompleted = (await readKey(COMPLETED_KEY)) || [];
     if (!allCompleted.length) {
-      const legacy = (await readKey(LEGACY_COMPLETED_KEY)) || [];
-      if (legacy.length) { await writeKey(COMPLETED_KEY, legacy); allCompleted = legacy; }
+      const claimedBy = await readString(CLAIM_FLAG);
+      if (!claimedBy || claimedBy === uid) {
+        const legacy = (await readKey(LEGACY_COMPLETED_KEY)) || [];
+        if (legacy.length) {
+          await writeKey(COMPLETED_KEY, legacy);
+          if (!claimedBy) await writeString(CLAIM_FLAG, uid);
+          allCompleted = legacy;
+        }
+      }
     }
 
     const toRestore = allCompleted.filter(e =>
@@ -107,8 +135,15 @@ export default async function handler(request) {
       // Read dailies queue — migrate from legacy key on first access.
       let currentQueue = (await readKey(QUEUE_KEY)) || [];
       if (!currentQueue.length) {
-        const legacy = (await readKey(LEGACY_QUEUE_KEY)) || [];
-        if (legacy.length) { await writeKey(QUEUE_KEY, legacy); currentQueue = legacy; }
+        const claimedBy = await readString(CLAIM_FLAG);
+        if (!claimedBy || claimedBy === uid) {
+          const legacy = (await readKey(LEGACY_QUEUE_KEY)) || [];
+          if (legacy.length) {
+            await writeKey(QUEUE_KEY, legacy);
+            if (!claimedBy) await writeString(CLAIM_FLAG, uid);
+            currentQueue = legacy;
+          }
+        }
       }
 
       const sorted = [...toRestore].sort((a, b) => {
