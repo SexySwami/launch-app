@@ -8,7 +8,7 @@ export const config = { runtime: 'edge' };
 
 
 
-const CATEGORIES = ['computer_work', 'cleaning', 'studying', 'cooking', 'making_coffee', 'general'];
+const CATEGORIES = ['computer_work', 'cleaning', 'laundry', 'studying', 'cooking', 'making_coffee', 'general'];
 
 const SYSTEM_PROMPT = `You are a task classifier for a focus app. Given a task title and optional description, classify it into exactly one of these six categories. Think about HOW and WHERE the person physically does the task — not just its topic.
 
@@ -16,7 +16,9 @@ computer_work — the task is done primarily at a desk or on a computer, phone, 
 
 studying — learning, memorizing, reviewing notes, homework, exam prep, reading, or academic work.
 
-cleaning — physical cleaning, tidying, organizing a physical space, laundry, dishes, or household chores.
+cleaning — physical cleaning, tidying, organizing a physical space, dishes, or household chores. Does NOT include laundry.
+
+laundry — doing laundry in any form: sorting, washing, drying, folding, ironing, or putting away clothes or linens.
 
 cooking — preparing food or drink in the kitchen: cooking, baking, meal prepping, following a recipe, making tea, or any food preparation task. Does NOT include making coffee.
 
