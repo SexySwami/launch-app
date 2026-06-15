@@ -121,7 +121,7 @@ async function readQueue(folder, uid) {
     if (folder === 'work') {
       const seed = [{
         id: newId(),
-        text: 'Make Coffee',
+        text: "Pay that bill that's been sitting in your inbox.",
         description: 'This is a sample task. Tap Launch to try the app!',
         createdAt: Date.now(),
       }];
