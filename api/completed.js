@@ -224,6 +224,31 @@ export default async function handler(request) {
             completedAt: Date.now(),
           });
         } else {
+          // Server-side duplicate guard: if a DIFFERENT entry for the same task
+          // text was already finalized today, merge into that entry instead of
+          // recording a second completed item. Catches cases where the client sent
+          // two finalize calls with different ids for the same mission.
+          if (!entry.completedAt) {
+            const todayStart = new Date();
+            todayStart.setHours(0, 0, 0, 0);
+            const existing = all.find(e =>
+              e !== entry &&
+              e.completedAt &&
+              e.completedAt >= todayStart.getTime() &&
+              (e.text || '').trim().toLowerCase() === (entry.text || '').trim().toLowerCase()
+            );
+            if (existing) {
+              if (Array.isArray(entry.microSteps) && entry.microSteps.length > 0) {
+                existing.microSteps = [...(existing.microSteps || []), ...entry.microSteps];
+              }
+              existing.completedAt = Date.now();
+              const dupIdx = all.indexOf(entry);
+              if (dupIdx >= 0) all.splice(dupIdx, 1);
+              await writeKey(CKEY, all);
+              return json({ entry: publicShape(existing) }, 200);
+            }
+          }
+
           entry.completedAt = Date.now();
 
           // Server-authoritative Short List detection.
