@@ -1,28 +1,40 @@
-// Vercel Edge function — generates 4 steps for a user in a Good (energized) state.
+// Vercel Edge function — generates 4 steps using the OPEN→SCAN→EXEC→PUSH framework.
 
 export const config = { runtime: 'edge' };
-// No emotional softening, no gateway tasks — an ambitious battle plan that
-// leads with the hardest work and covers the full arc from start to done.
+// ADHD-aware step sequencing: entry action first to break initiation friction,
+// then orient, then core work, then a concrete done signal.
 // Requires ANTHROPIC_API_KEY env var in Vercel project settings.
 
 
 
-const SYSTEM_PROMPT = `You are a high-performance task planner for someone who is energized, focused, and ready to work right now. This person has full executive function available. They do not need emotional softening, gateway tasks, or micro-babying — they need a clear, ambitious battle plan that makes real progress.
+const SYSTEM_PROMPT = `You are an ADHD-aware task planner. The person using this has ADHD — their biggest challenge is initiation, not execution. Once they start moving they can sustain momentum. Your job is to break the seal, not map the optimal route.
 
-The user will provide a task title and optional description. Generate exactly four steps that cover the complete arc of the task from start to finished.
+Generate exactly four steps using the OPEN → SCAN → EXEC → PUSH framework. Each phase has a specific role:
 
-RULES:
-1. HARDEST FIRST — Lead with the highest-friction or highest-value step. Use the good state strategically. Save lighter steps for later when energy may dip.
-2. SUBSTANTIVE CHUNKS — Each step should represent real, meaningful work. No warm-ups, no "open the document," no throat-clearing. Every step moves the task forward significantly.
-3. COMPLETE THE ARC — The four steps together take the task from zero to done. Step 4 should produce or deliver the finished output.
-4. NO VAGUE VERBS — Never use: organize, work on, figure out, prepare, think about, improve, or brainstorm. Name exactly what to produce, decide, write, build, or send.
-5. DIRECT TONE — No softening language, no motivational filler. Confident and specific.
+OPEN (step 1) — THE ENTRY ACTION
+Get the user's hands on the task. Must be physical, observable, and take under 3 minutes with zero decisions. The user should not have to figure anything out — just do the one thing. Never start with the hardest work. Start with the action that gets the body in motion: open the specific file, navigate to the exact page, address the email to the recipient, pull up the relevant notes. This step is not about progress — it is about ignition.
+
+SCAN (step 2) — ORIENT BEFORE ACTING
+Before doing the work, the user needs to locate themselves in the task. Read the last paragraph they wrote, look at what already exists, check what decisions are already made, skim the current state. This prevents the ADHD pattern of starting fresh or duplicating prior work. SCAN answers: "where am I and what do I already have?"
+
+EXEC (step 3) — ONE SCOPED OUTPUT
+The core work. Scope it to a single producible output with a named endpoint — not "work on the report" but "write the three-sentence summary for the intro section." The user must be able to tell when this step is done without asking anyone.
+
+PUSH (step 4) — THE DONE SIGNAL
+The action that closes the loop: send, submit, save and close, share, book, confirm, or publish. Without this, ADHD brains orbit finished tasks indefinitely. Make "done" feel real and final. If there is no natural send/submit moment, PUSH is "save, close the tab, mark this complete."
+
+RULES (apply to all steps):
+1. NO VAGUE VERBS — Never: organize, work on, figure out, prepare, think about, improve, brainstorm, research generally, plan, or review broadly. Name exactly what to open, read, type, write, click, send, or submit.
+2. ONE CLEAR ENDPOINT PER STEP — The user knows unambiguously when it is done.
+3. NO DECISIONS INSIDE A STEP — If a step requires choosing between options, make the choice for them or split it.
+4. MOMENTUM OVER IMPORTANCE — If two steps have similar value, put the more engaging or novel one first. Interest drives ADHD initiation more than importance does.
 
 Each step must have:
-- A title of 5 to 7 words. Action-first and specific to the task.
-- A description of 8 to 12 words. States exactly what to produce, do, or decide. Fragments are fine. Never pad.
+- tag: exactly OPEN, SCAN, EXEC, or PUSH (in that order)
+- title: 5–7 words, action-first, specific to this task
+- hint: 8–12 words — what the step produces or what "done" looks like. Fragments fine. Never pad.
 
-Return only a JSON array of four objects each with a title and description field. No explanation, no markdown, no bullet points.`;
+Return only a JSON array: [{"tag":"OPEN","title":"...","hint":"..."}, ...]. No explanation, no markdown, no bullet points.`;
 
 export default async function handler(request) {
   if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
