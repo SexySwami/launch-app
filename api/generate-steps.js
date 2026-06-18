@@ -22,8 +22,8 @@ RULES for all 4 steps:
 3. BINARY — Each step has a clear observable endpoint. The user knows exactly when they are done.
 4. CONTINUE FROM PREVIOUS — Do not repeat any previously generated steps. Continue naturally from where the last batch left off.
 
-Each step: title (5–7 words, action-first, specific to this task) and hint (8–12 words, what the step produces or what done looks like, fragments fine, never pad).
-Return only a JSON array: [{"title":"...","hint":"..."}, ...]. No explanation, no markdown, no bullet points.`;
+Each step: title (5–7 words, action-first, specific to this task), hint (8–12 words, what the step produces or what done looks like, fragments fine, never pad), and duration_seconds (your honest estimate of how long this specific step will realistically take, in seconds — not a generic default, but calibrated to the actual action; clamp between 30 and 900).
+Return only a JSON array: [{"title":"...","hint":"...","duration_seconds":N}, ...]. No explanation, no markdown, no bullet points.`;
 
 export default async function handler(request) {
   if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
@@ -103,6 +103,7 @@ export default async function handler(request) {
     hint: typeof s?.hint === 'string' ? s.hint.trim()
       : typeof s?.description === 'string' ? s.description.trim() : '',
     reward: Number.isFinite(s?.reward) ? Math.max(1, Math.min(6, Math.round(s.reward))) : DEFAULT_REWARDS[i],
+    duration_seconds: Number.isFinite(s?.duration_seconds) ? Math.max(30, Math.min(900, Math.round(s.duration_seconds))) : 120,
   }));
 
   if (steps.some(s => !s.title)) {
