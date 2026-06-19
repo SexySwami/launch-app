@@ -31,9 +31,10 @@ RULES:
 
 9. CONTINUE FROM PREVIOUS — Do not repeat any previously generated steps. Each batch continues naturally from where the last one left off.
 
-Return only a JSON array of exactly 4 objects each with a title and description field.
+Return only a JSON array of exactly 4 objects each with a title, description, and duration_seconds field.
 - Title: 4 to 6 words. Simple, physical, action-first. No motivational language.
 - Description: 8 to 12 words. One specific thing to do. Plain and direct. Fragments are fine.
+- duration_seconds: your honest estimate of how long this specific micro-step will realistically take, in seconds. These steps are intentionally tiny — most should be 15–120 seconds. Clamp between 15 and 300.
 No explanation, no markdown, no bullet points.`;
 
 export default async function handler(request) {
@@ -123,6 +124,7 @@ export default async function handler(request) {
   const steps = raw.map((s) => ({
     title: typeof s?.title === 'string' ? s.title.trim() : '',
     description: typeof s?.description === 'string' ? s.description.trim() : '',
+    duration_seconds: Number.isFinite(s?.duration_seconds) ? Math.max(15, Math.min(300, Math.round(s.duration_seconds))) : 60,
   }));
 
   if (steps.some(s => !s.title)) {

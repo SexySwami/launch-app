@@ -23,9 +23,10 @@ RULES for all 4 steps:
 3. BINARY — Each step has a clear observable endpoint. The user knows exactly when they are done.
 4. CONTINUE FROM PREVIOUS — Do not repeat any previously generated steps. Each batch continues naturally from where the last one left off.
 
-Return only a JSON array of exactly 4 objects each with a title and description field.
+Return only a JSON array of exactly 4 objects each with a title, description, and duration_seconds field.
 - Title: 5 to 7 words. Specific and directive.
 - Description: 8 to 12 words. Plain, direct, concrete. Fragments are fine. Never pad.
+- duration_seconds: your honest estimate of how long this specific step will realistically take, in seconds. Orientation steps (steps 1–2) are typically 60–180 seconds; first actions (steps 3–4) are typically 120–600 seconds. Clamp between 20 and 900.
 No explanation, no markdown, no bullet points.`;
 
 export default async function handler(request) {
@@ -115,6 +116,7 @@ export default async function handler(request) {
   const steps = raw.map((s) => ({
     title: typeof s?.title === 'string' ? s.title.trim() : '',
     description: typeof s?.description === 'string' ? s.description.trim() : '',
+    duration_seconds: Number.isFinite(s?.duration_seconds) ? Math.max(20, Math.min(900, Math.round(s.duration_seconds))) : 90,
   }));
 
   if (steps.some(s => !s.title)) {

@@ -1,28 +1,29 @@
-// Vercel Edge function — generates 4 steps for a user in a Good (energized) state.
+// Vercel Edge function — generates 4 Good-mode steps (energized, ready to work).
 
 export const config = { runtime: 'edge' };
-// No emotional softening, no gateway tasks — an ambitious battle plan that
-// leads with the hardest work and covers the full arc from start to done.
+// Good = user has energy and is ready to move. Goal: give a clear entry point
+// and scope the first real work so they don't spin out deciding where to start.
 // Requires ANTHROPIC_API_KEY env var in Vercel project settings.
 
 
 
-const SYSTEM_PROMPT = `You are a high-performance task planner for someone who is energized, focused, and ready to work right now. This person has full executive function available. They do not need emotional softening, gateway tasks, or micro-babying — they need a clear, ambitious battle plan that makes real progress.
+const SYSTEM_PROMPT = `You are a momentum-keeper for people with ADHD who are energized and ready to work. They do not need motivation — they are already moving. Your job is to give them a clear entry point and scope the first real work so they don't spin out trying to figure out where to start.
 
-The user will provide a task title and optional description. Generate exactly four steps that cover the complete arc of the task from start to finished.
+Generate exactly 4 steps.
 
-RULES:
-1. HARDEST FIRST — Lead with the highest-friction or highest-value step. Use the good state strategically. Save lighter steps for later when energy may dip.
-2. SUBSTANTIVE CHUNKS — Each step should represent real, meaningful work. No warm-ups, no "open the document," no throat-clearing. Every step moves the task forward significantly.
-3. COMPLETE THE ARC — The four steps together take the task from zero to done. Step 4 should produce or deliver the finished output.
-4. NO VAGUE VERBS — Never use: organize, work on, figure out, prepare, think about, improve, or brainstorm. Name exactly what to produce, decide, write, build, or send.
-5. DIRECT TONE — No softening language, no motivational filler. Confident and specific.
+STRUCTURE — always follow this pattern:
+- Step 1: Open the artifact. The literal, physical act of pulling up the primary document, file, email, app, or tool the task involves. Title must begin with "Open." Nothing else — no reading, no analyzing, just making the thing appear on screen.
+- Step 2: Find where to pick up. One quick look to locate where things currently stand — the last paragraph written, the current state of the file, what decisions are already made. Not a full review. One pass.
+- Steps 3 and 4: Do the work. The first two real, specific, scoped pieces of work. Each one produces something nameable with a clear endpoint. Not tiny warm-up steps — sized for someone with energy. But not "complete the whole thing" either. Scope to a single section, item, or output.
 
-Each step must have:
-- A title of 5 to 7 words. Action-first and specific to the task.
-- A description of 8 to 12 words. States exactly what to produce, do, or decide. Fragments are fine. Never pad.
+RULES for all 4 steps:
+1. NO VAGUE VERBS — Never: organize, work on, figure out, prepare, think about, improve, brainstorm, or review broadly. Use specific physical and observable actions only.
+2. ONE PATH PER STEP — No embedded choices. Tell the user exactly what to open, read, write, click, or submit.
+3. BINARY — Each step has a clear observable endpoint. The user knows exactly when they are done.
+4. CONTINUE FROM PREVIOUS — Do not repeat any previously generated steps. Continue naturally from where the last batch left off.
 
-Return only a JSON array of four objects each with a title and description field. No explanation, no markdown, no bullet points.`;
+Each step: title (5–7 words, action-first, specific to this task), hint (8–12 words, what the step produces or what done looks like, fragments fine, never pad), and duration_seconds (your honest estimate of how long this specific step will realistically take, in seconds — not a generic default, but calibrated to the actual action; clamp between 30 and 900).
+Return only a JSON array: [{"title":"...","hint":"...","duration_seconds":N}, ...]. No explanation, no markdown, no bullet points.`;
 
 export default async function handler(request) {
   if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
@@ -102,6 +103,7 @@ export default async function handler(request) {
     hint: typeof s?.hint === 'string' ? s.hint.trim()
       : typeof s?.description === 'string' ? s.description.trim() : '',
     reward: Number.isFinite(s?.reward) ? Math.max(1, Math.min(6, Math.round(s.reward))) : DEFAULT_REWARDS[i],
+    duration_seconds: Number.isFinite(s?.duration_seconds) ? Math.max(30, Math.min(900, Math.round(s.duration_seconds))) : 120,
   }));
 
   if (steps.some(s => !s.title)) {
