@@ -1,33 +1,31 @@
-// Vercel Edge function — generates chip options for 3 fixed clarifying questions
-// to help regenerate better, more accurate steps for a specific task.
+// Vercel Edge function — generates task-specific clarifying questions and chips
+// to help regenerate more accurate steps for the given task.
+// Uses claude-haiku-4-5 for speed (single focused judgment call).
 // Requires ANTHROPIC_API_KEY in Vercel settings.
 
 export const config = { runtime: 'edge' };
 
-const QUESTIONS = [
-  'What will you have when this is done?',
-  'What do you already have, or where are you starting from?',
-  'Is there anything specific that feels hard or unclear about this?',
-];
+const SYSTEM_PROMPT = `You generate clarifying questions for a task-planning app. Given a task, output exactly 3 short questions — one per category, always in this order — each with 3-4 task-specific answer chips.
 
-const SYSTEM_PROMPT = `You generate chip answer options for 3 fixed questions in a task-planning app. For the given task, produce 3-4 short chip answers (2-5 words each) for each question:
+Category order (always follow this):
+1. END STATE — what will the user have when this is done? A specific deliverable, artifact, or outcome. Not "done" generically — the actual thing.
+2. STARTING POINT — what do they already have, or where are they starting from? Could be 0% to nearly done.
+3. STUCK POINT — what part specifically feels hard or unclear? Specific to this task type, not generic anxiety.
 
-Q1 — "What will you have when this is done?"
-Chips = realistic completion states: the specific deliverable, artifact, or outcome for THIS task.
+Rules for question text:
+- One short sentence, conversational, not clinical
+- Make it SPECIFIC to this exact task — not a template
+- Don't ask "why" — ask about outputs, starting points, or blocks
+- Don't ask process questions ("how do you usually do this?")
 
-Q2 — "What do you already have, or where are you starting from?"
-Chips = realistic starting points: blank slate, partial work, has some pieces, already started, etc.
+Rules for chips:
+- 3-4 chips per question, 2-5 words each
+- Specific to this task — not generic filler
+- Honest and relatable — how someone actually thinks about their work
+- For the STUCK POINT question, always include "Nothing, I'm clear" as the last chip
 
-Q3 — "Is there anything specific that feels hard or unclear about this?"
-Chips = the most likely actual blockers for THIS task type — specific unknowns or missing pieces, not generic anxiety. Always include "Nothing, I'm clear" as the last chip.
-
-Rules:
-- Chips must be SPECIFIC to this exact task. "A document" is bad. "Drafted intro paragraph" is good.
-- Honest and relatable — how someone actually thinks about their work, not formal language.
-- 2-5 words per chip, 3-4 chips per question.
-
-Output JSON only, no preamble:
-{"chips":[["Q1 chip A","Q1 chip B","Q1 chip C"],["Q2 chip A","Q2 chip B","Q2 chip C"],["Q3 chip A","Q3 chip B","Q3 chip C","Nothing, I'm clear"]]}`;
+Return JSON only, no preamble:
+{"questions":[{"text":"End state question?","chips":["Option A","Option B","Option C"]},{"text":"Starting point question?","chips":["Option A","Option B","Option C"]},{"text":"Stuck point question?","chips":["Option A","Option B","Option C","Nothing, I'm clear"]}]}`;
 
 export default async function handler(request) {
   if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
@@ -67,7 +65,7 @@ export default async function handler(request) {
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
+        model: 'claude-haiku-4-5',
         max_tokens: 512,
         system: SYSTEM_PROMPT,
         messages: [{ role: 'user', content: userContent }],
@@ -88,16 +86,20 @@ export default async function handler(request) {
   try { parsed = JSON.parse(match[0]); }
   catch { return json({ error: 'Invalid JSON from model' }, 502); }
 
-  const rawChips = Array.isArray(parsed.chips) ? parsed.chips : [];
-  const questions = QUESTIONS.map((text, i) => ({
-    text,
-    chips: (Array.isArray(rawChips[i]) ? rawChips[i] : [])
-      .filter(c => typeof c === 'string' && c.trim())
-      .map(c => c.trim())
-      .slice(0, 4),
-  })).filter(q => q.chips.length > 0);
+  const rawQuestions = Array.isArray(parsed.questions) ? parsed.questions : [];
+  const questions = rawQuestions
+    .filter(q => typeof q?.text === 'string' && q.text.trim() && Array.isArray(q.chips))
+    .map(q => ({
+      text: q.text.trim(),
+      chips: q.chips
+        .filter(c => typeof c === 'string' && c.trim())
+        .map(c => c.trim())
+        .slice(0, 4),
+    }))
+    .filter(q => q.chips.length > 0)
+    .slice(0, 3);
 
-  if (questions.length === 0) return json({ error: 'Could not parse chip options from model' }, 502);
+  if (questions.length === 0) return json({ error: 'Could not parse questions from model' }, 502);
 
   return json({ questions }, 200);
 }
