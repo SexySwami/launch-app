@@ -74,9 +74,12 @@ export default async function handler(request) {
         .join('\n')
     : '(none — this is batch 1)';
 
+  const refinementContext = typeof body?.refinementContext === 'string' ? body.refinementContext.trim() : '';
+
   const userContent = [
     `Task: "${mission}"`,
     description ? `Description: "${description}"` : null,
+    refinementContext ? `Additional context from the user:\n${refinementContext}` : null,
     `Current batch number: ${batchNumber}`,
     `Previously generated steps:\n${previousBlock}`,
     `Now generate exactly 4 NEW micro-steps that continue from step ${previousSteps.length + 1}.`,
