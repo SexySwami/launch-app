@@ -6,20 +6,30 @@
 
 export const config = { runtime: 'edge' };
 
-const SYSTEM_PROMPT = `You are helping someone get better AI-generated steps for a task. Generate exactly 2 clarifying questions about WHY they are doing this task — their motivation, urgency, and what success looks like to them. This context helps generate steps that match their real goal, not just the surface task.
+const QUESTIONS = [
+  'What will you have when this is done?',
+  'What do you already have, or where are you starting from?',
+  'Is there anything specific that feels hard or unclear about this?',
+];
 
-Question 1: Focus on the immediate reason or trigger. Why now? What's driving them to do this?
-Question 2: Focus on the outcome. What does completion mean for them? What's the real goal underneath the task?
+const SYSTEM_PROMPT = `You generate chip answer options for 3 fixed questions in a task-planning app. For the given task, produce 3-4 short chip answers (2-5 words each) for each question:
+
+Q1 — "What will you have when this is done?"
+Chips = realistic completion states: the specific deliverable, artifact, or outcome for THIS task.
+
+Q2 — "What do you already have, or where are you starting from?"
+Chips = realistic starting points: blank slate, partial work, has some pieces, already started, etc.
+
+Q3 — "Is there anything specific that feels hard or unclear about this?"
+Chips = the most likely actual blockers for THIS task type — specific unknowns or missing pieces, not generic anxiety. Always include "Nothing, I'm clear" as the last chip.
 
 Rules:
-- Questions must be WHY-oriented, not HOW-oriented. Do NOT ask about tools, access, experience level, or technical process.
-- Make questions SPECIFIC to the actual task — not generic. "Why are you doing this?" is bad. "What's pushing you to write this email today?" is good.
-- Each question needs 3-4 short chips (2-5 words each) reflecting real, distinct human reasons — not corporate-speak
-- Chips should feel honest and relatable — how someone would actually think about this
-- Do NOT ask about things clearly stated in the task or description
+- Chips must be SPECIFIC to this exact task. "A document" is bad. "Drafted intro paragraph" is good.
+- Honest and relatable — how someone actually thinks about their work, not formal language.
+- 2-5 words per chip, 3-4 chips per question.
 
 Output JSON only, no preamble:
-{"questions":[{"text":"Question 1?","chips":["Reason A","Reason B","Reason C"]},{"text":"Question 2?","chips":["Goal A","Goal B","Goal C"]}]}`;
+{"chips":[["Q1 chip A","Q1 chip B","Q1 chip C"],["Q2 chip A","Q2 chip B","Q2 chip C"],["Q3 chip A","Q3 chip B","Q3 chip C","Nothing, I'm clear"]]}`;
 
 export default async function handler(request) {
   if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
@@ -80,18 +90,16 @@ export default async function handler(request) {
   try { parsed = JSON.parse(match[0]); }
   catch { return json({ error: 'Invalid JSON from model' }, 502); }
 
-  const questions = Array.isArray(parsed.questions)
-    ? parsed.questions
-        .filter(q => q && typeof q.text === 'string' && Array.isArray(q.chips) && q.chips.length > 0)
-        .slice(0, 2)
-        .map(q => ({
-          text: q.text.trim(),
-          chips: q.chips
-            .filter(c => typeof c === 'string' && c.trim())
-            .map(c => c.trim())
-            .slice(0, 4),
-        }))
-    : [];
+  const rawChips = Array.isArray(parsed.chips) ? parsed.chips : [];
+  const questions = QUESTIONS.map((text, i) => ({
+    text,
+    chips: (Array.isArray(rawChips[i]) ? rawChips[i] : [])
+      .filter(c => typeof c === 'string' && c.trim())
+      .map(c => c.trim())
+      .slice(0, 4),
+  })).filter(q => q.chips.length > 0);
+
+  if (questions.length === 0) return json({ error: 'Could not parse chip options from model' }, 502);
 
   return json({ questions }, 200);
 }
