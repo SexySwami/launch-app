@@ -3,7 +3,7 @@
 
 export const config = { runtime: 'edge' };
 
-const SYSTEM_PROMPT = `You are an expert task planner. The user will provide a task title and an optional description with additional context. Use both to generate exactly four highly specific and actionable micro steps. Each step must have a title of no more than 5 to 7 words and a description of exactly one short concise sentence that summarizes the key point of that step. Return only a JSON array of four objects each with a title and description field. No explanation, no markdown, no bullet points.`;
+const SYSTEM_PROMPT = `You are an expert task planner. The user will provide a task title and an optional description with additional context. Use both to generate exactly four highly specific and actionable micro steps. Each step must have a title of no more than 5 to 7 words and a description of exactly one short concise sentence that summarizes the key point of that step. Never generate a step that asks the user to count anything (e.g. "Count the files", "Count the folders") — replace any such step with a directly actionable alternative. Return only a JSON array of four objects each with a title and description field. No explanation, no markdown, no bullet points.`;
 
 export default async function handler(request) {
   if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
