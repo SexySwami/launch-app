@@ -22,6 +22,7 @@ RULES for all 4 steps:
 2. ONE PATH PER STEP — No embedded choices. Tell the user exactly what to open, read, look at, or touch. Remove every decision.
 3. BINARY — Each step has a clear observable endpoint. The user knows exactly when they are done.
 4. CONTINUE FROM PREVIOUS — Do not repeat any previously generated steps. Each batch continues naturally from where the last one left off.
+5. NO COUNTING — Never generate a step that asks the user to count anything (e.g. "Count the files", "Count the folders"). Replace any such step with a directly actionable alternative.
 
 Return only a JSON array of exactly 4 objects each with a title, description, and duration_seconds field.
 - Title: 5 to 7 words. Specific and directive.

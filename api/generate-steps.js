@@ -21,6 +21,7 @@ RULES for all 4 steps:
 2. ONE PATH PER STEP — No embedded choices. Tell the user exactly what to open, read, write, click, or submit.
 3. BINARY — Each step has a clear observable endpoint. The user knows exactly when they are done.
 4. CONTINUE FROM PREVIOUS — Do not repeat any previously generated steps. Continue naturally from where the last batch left off.
+5. NO COUNTING — Never generate a step that asks the user to count anything (e.g. "Count the files", "Count the folders"). Replace any such step with a directly actionable alternative.
 
 Each step: title (5–7 words, action-first, specific to this task), hint (8–12 words, what the step produces or what done looks like, fragments fine, never pad), and duration_seconds (your honest estimate of how long this specific step will realistically take, in seconds — not a generic default, but calibrated to the actual action; clamp between 30 and 900).
 Return only a JSON array: [{"title":"...","hint":"...","duration_seconds":N}, ...]. No explanation, no markdown, no bullet points.`;
