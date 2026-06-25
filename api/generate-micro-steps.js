@@ -31,6 +31,8 @@ RULES:
 
 9. CONTINUE FROM PREVIOUS — Do not repeat any previously generated steps. Each batch continues naturally from where the last one left off.
 
+10. NO COUNTING — Never generate a step that asks the user to count anything (e.g. "Count the files", "Count the folders"). Replace any such step with a directly actionable alternative.
+
 Return only a JSON array of exactly 4 objects each with a title, description, and duration_seconds field.
 - Title: 4 to 6 words. Simple, physical, action-first. No motivational language.
 - Description: 8 to 12 words. One specific thing to do. Plain and direct. Fragments are fine.
