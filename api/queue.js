@@ -172,6 +172,10 @@ export default async function handler(request) {
         if (typeof i.description === 'string' && i.description) {
           leaf.description = i.description.slice(0, 2000);
         }
+        if (i.sourceItemId) leaf.sourceItemId = i.sourceItemId;
+        if (i.sourceFolderId) leaf.sourceFolderId = i.sourceFolderId;
+        if (Number.isFinite(i.estimatedMinutes)) leaf.estimatedMinutes = i.estimatedMinutes;
+        if (typeof i.estimatedLabel === 'string' && i.estimatedLabel) leaf.estimatedLabel = i.estimatedLabel;
         return leaf;
       };
       const cleanEntry = (i) => {
