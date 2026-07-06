@@ -135,6 +135,7 @@ function publicShape(entry) {
     microSteps: Array.isArray(entry.microSteps) ? entry.microSteps : [],
     createdAt: entry.createdAt || 0,
     completedAt: entry.completedAt || null,
+    ...(Number.isFinite(entry.estimatedMinutes) ? { estimatedMinutes: entry.estimatedMinutes, estimatedLabel: entry.estimatedLabel || '' } : {}),
   };
 }
 
@@ -202,6 +203,7 @@ export default async function handler(request) {
             microSteps: [],
             createdAt: Date.now(),
             completedAt: null,
+            ...(Number.isFinite(body?.estimatedMinutes) ? { estimatedMinutes: body.estimatedMinutes, estimatedLabel: typeof body?.estimatedLabel === 'string' ? body.estimatedLabel : '' } : {}),
           };
           all.push(entry);
         } else {
@@ -212,6 +214,10 @@ export default async function handler(request) {
           if (body?.folderId) entry.folderId = normalizeFolder(body.folderId);
           if (body?.description !== undefined) entry.description = typeof body.description === 'string' ? body.description.slice(0, 2000) : null;
           if (body?.wasOnShortList) entry.wasOnShortList = true;
+          if (Number.isFinite(body?.estimatedMinutes)) {
+            entry.estimatedMinutes = body.estimatedMinutes;
+            entry.estimatedLabel = typeof body?.estimatedLabel === 'string' ? body.estimatedLabel : '';
+          }
         }
 
         if (action === 'log-step') {
@@ -346,6 +352,25 @@ export default async function handler(request) {
           queueItems: updatedQueue,
           folderId: targetFolder,
         }, 200);
+      }
+
+      if (action === 'update-estimate') {
+        const id = (body?.id || '').toString();
+        if (!id) return json({ error: 'Missing id' }, 400);
+        const all = await readKey(CKEY);
+        const entry = all.find(e => e.id === id);
+        if (!entry) return json({ error: 'Entry not found' }, 404);
+        if (body?.estimatedMinutes == null) {
+          delete entry.estimatedMinutes;
+          delete entry.estimatedLabel;
+        } else if (Number.isFinite(body.estimatedMinutes)) {
+          entry.estimatedMinutes = body.estimatedMinutes;
+          entry.estimatedLabel = typeof body?.estimatedLabel === 'string' ? body.estimatedLabel : '';
+        } else {
+          return json({ error: 'Invalid estimatedMinutes' }, 400);
+        }
+        await writeKey(CKEY, all);
+        return json({ entry: publicShape(entry) }, 200);
       }
 
       return json({ error: 'Unknown action' }, 400);
