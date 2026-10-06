@@ -88,7 +88,9 @@ export default async function handler(request) {
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
+        model: 'claude-sonnet-5-5',
+        // 5.5 thinks by default; keep it off so content[0] is text and max_tokens isn't spent on thinking.
+        thinking: { type: 'between_tools' },
         max_tokens: 600,
         system: SYSTEM_PROMPT,
         messages: [{ role: 'user', content: userContent }],
